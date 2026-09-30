@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import argparse
-import functools
 import json
 import sys
 import webbrowser
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from filelock import Timeout
 
 from . import __version__
 from .errors import PracticeError
+from .library import delete_episode, list_trash, restore_episode
 from .pipeline import BuildOptions, build
 from .render import render_player, update_library
 from .runtime import MODELS, Runtime
+from .server import library_server
 
 
 def parser() -> argparse.ArgumentParser:
@@ -58,6 +58,14 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="檢查本地環境與模型")
     render = sub.add_parser("render", help="使用既有 alignment.json 重建播放器，不重新對齊")
     render.add_argument("episode", type=Path, help="含 alignment.json 和 audio.mp3 的單集目錄")
+    delete = sub.add_parser("delete", help="將一集移到可復原的回收區")
+    delete.add_argument("episode", help="練習庫內的單集資料夾名稱")
+    delete.add_argument("--library", type=Path, default=Path("library"))
+    trash = sub.add_parser("trash", help="列出回收區內容及復原 ID")
+    trash.add_argument("--library", type=Path, default=Path("library"))
+    restore = sub.add_parser("restore", help="用回收區 ID 復原一集")
+    restore.add_argument("id")
+    restore.add_argument("--library", type=Path, default=Path("library"))
     return command
 
 
@@ -66,14 +74,28 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "serve":
             root = args.library.expanduser().resolve()
-            update_library(root)
-            handler = functools.partial(SimpleHTTPRequestHandler, directory=str(root))
-            with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
+            with library_server(root, args.port) as server:
                 url = f"http://127.0.0.1:{server.server_port}/"
                 print(f"練習庫：{url}\n按 Ctrl+C 結束。", flush=True)
                 if args.open:
                     webbrowser.open(url)
                 server.serve_forever()
+        elif args.command in {"delete", "trash", "restore"}:
+            root = args.library.expanduser().resolve()
+            if args.command == "trash":
+                rows = list_trash(root)
+                for row in rows:
+                    print(f"{row['id']}  {row['title']}")
+                if not rows:
+                    print("回收區是空的。")
+            else:
+                if args.command == "delete":
+                    record = delete_episode(root, args.episode)
+                    print(f"已移到回收區：{record['title']}\n復原 ID：{record['id']}")
+                else:
+                    record = restore_episode(root, args.id)
+                    print(f"已復原：{record['title']}")
+                update_library(root)
         elif args.command == "render":
             folder = args.episode.expanduser().resolve()
             data = json.loads((folder / "alignment.json").read_text(encoding="utf-8"))

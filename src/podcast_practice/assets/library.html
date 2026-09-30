@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的英文聽力練習</title>
+<style>
+:root{color-scheme:light;--paper:#fbf7f0;--ink:#242a2c;--muted:#657071;--green:#27645d;--line:#ddd6cb}
+*{box-sizing:border-box}body{background:var(--paper);color:var(--ink);font-family:system-ui;max-width:900px;margin:50px auto;padding:0 24px 50px}h1{font-family:Georgia,serif;font-weight:500;font-size:36px;margin:12px 0}.brand{color:var(--green);font-size:12px;font-weight:700;letter-spacing:.12em}.intro,.help{color:var(--muted);line-height:1.7}.episode{display:flex;align-items:center;gap:18px;padding:20px;margin:14px 0;border:1px solid var(--line);border-radius:12px;background:#fffdf9}.episode a{min-width:0;flex:1;text-decoration:none;color:inherit}.episode a:hover strong{color:var(--green)}strong{display:block;font-size:20px;font-weight:600;overflow-wrap:anywhere}.meta{display:block;margin-top:9px;color:var(--muted);font-size:13px}button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 13px;background:#fffdf9;cursor:pointer;white-space:nowrap}button:hover{background:#e8f0eb}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible{outline:3px solid #619891;outline-offset:3px}.delete{color:#943f31}.notice{background:#e8f0eb;border-radius:10px;padding:14px 16px;margin:22px 0;display:flex;align-items:center;gap:16px}.notice span{flex:1;overflow-wrap:anywhere}.notice[hidden]{display:none}.notice.error{background:#f9e8df;color:#943f31}details{margin-top:32px;border-top:1px solid var(--line);padding-top:20px}summary{cursor:pointer;color:var(--muted);font-size:15px}.empty{color:var(--muted);padding:20px 0}.help{font-size:13px}#offline{margin-top:20px}
+@media(max-width:600px){body{margin-top:30px;padding:0 18px 40px}h1{font-size:29px}.episode{padding:16px;gap:12px}strong{font-size:18px}.notice{flex-wrap:wrap}.notice span{flex-basis:100%}}
+</style>
+</head>
+<body>
+<div class="brand">LISTENING ROOM / MY LIBRARY</div>
+<h1>我的英文聽力練習</h1>
+<p class="intro">每天一集。點選內容開始離線練習。</p>
+<div id="notice" class="notice" role="status" hidden><span id="message"></span><button id="undo" hidden>復原剛刪除的一集</button></div>
+<main id="episodes">__EPISODE_ITEMS__</main>
+<details id="trash-panel"><summary>回收區（<span id="trash-count">__TRASH_COUNT__</span>）</summary><p class="help">刪除的練習仍保存在這裡，可以復原。原始音檔、原稿與模型會保留。</p><div id="trash">__TRASH_ITEMS__</div></details>
+<p id="offline" class="help" hidden>請透過練習庫服務開啟此頁，才能刪除或復原內容。</p>
+<script id="library-config" type="application/json">__LIBRARY_CONFIG__</script>
+<script>
+const config=JSON.parse(document.getElementById('library-config').textContent);
+const $=id=>document.getElementById(id);
+let lastDeleted=null;
+const enabled=Boolean(config.token)&&location.protocol==='http:';
+document.querySelectorAll('[data-action]').forEach(b=>b.disabled=!enabled);
+$('offline').hidden=enabled;
+function notice(text,error=false){$('message').textContent=text;$('notice').hidden=false;$('notice').classList.toggle('error',error);$('undo').hidden=!lastDeleted||error;}
+async function action(button){
+ const kind=button.dataset.action;
+ const input=kind==='delete'?{episode:button.dataset.episode}:{id:button.dataset.id};
+ button.disabled=true;
+ try{
+  const response=await fetch(`/api/${kind}`,{method:'POST',headers:{'Content-Type':'application/json','X-Practice-Token':config.token},body:JSON.stringify(input)});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'操作失敗，請重試。');
+  if(kind==='delete')lastDeleted=result.id;else if(lastDeleted===result.id)lastDeleted=null;
+  const page=await fetch('/',{cache:'no-store'});
+  if(!page.ok)throw new Error('操作已完成，請重新整理練習庫。');
+  const next=new DOMParser().parseFromString(await page.text(),'text/html');
+  for(const id of ['episodes','trash','trash-count'])$(id).replaceChildren(...next.getElementById(id).childNodes);
+  notice(kind==='delete'?`已將「${result.title}」移到回收區。`:`已復原「${result.title}」。`);
+ }catch(error){notice(error.message,true);}finally{if(button.isConnected)button.disabled=false;}
+}
+document.addEventListener('click',event=>{const button=event.target.closest('button[data-action]');if(button&&enabled)action(button);});
+$('undo').addEventListener('click',event=>{event.stopPropagation();if(!lastDeleted)return;const button=$('undo');button.dataset.action='restore';button.dataset.id=lastDeleted;action(button);});
+</script>
+</body>
+</html>

@@ -64,6 +64,20 @@ uv run podcast-practice serve --open
 
 只監聽 `127.0.0.1:8766`。按 Ctrl+C 結束；播放器仍可單獨離線使用。
 
+## 刪除與復原
+
+練習庫中每集右側有「刪除」按鈕。刪除後可按「復原剛刪除的一集」，也可展開「回收區」復原；重新整理或重開服務後仍可復原。
+
+刪除會將整集輸出移到 `library/.trash/`，不會刪除原始音檔、原稿、共用模型或對齊快取。回收區仍占用磁碟空間。直接用 `file://` 開啟 index.html 時，刪除與復原按鈕會停用；請使用 `serve`，或在命令列操作：
+
+```sh
+uv run podcast-practice delete episode-name-xxxxxxxx
+uv run podcast-practice trash
+uv run podcast-practice restore <回收區列出的ID>
+```
+
+自訂練習庫可加 `--library /path/to/library`。同名資料夾已存在時會拒絕復原，以免覆寫其他練習。
+
 ## Transcript 建議格式
 
 不需自己加時間。可以是正常英文段落，或講者標題：

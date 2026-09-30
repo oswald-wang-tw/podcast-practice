@@ -15,6 +15,8 @@ from urllib.parse import quote
 
 from praatio import textgrid
 
+from .library import list_trash
+
 
 def timestamp(seconds: float, *, comma: bool = False) -> str:
     value = round(seconds * 1000)
@@ -123,7 +125,7 @@ def render_player(data: dict, audio: Path, output: Path) -> None:
     temporary.replace(output)
 
 
-def update_library(root: Path) -> None:
+def library_html(root: Path, token: str | None = None) -> str:
     root.mkdir(parents=True, exist_ok=True)
     episodes = []
     for path in root.glob("*/alignment.json"):
@@ -135,21 +137,35 @@ def update_library(root: Path) -> None:
     items = []
     for created, directory, data in episodes:
         count = len(data["sentences"])
+        duration = f"{int(data['duration'] // 60):02}:{int(data['duration'] % 60):02}"
         items.append(
-            f'<a class="episode" href="{quote(directory)}/player.html">'
+            f'<article class="episode"><a href="{quote(directory)}/player.html">'
             f"<strong>{html.escape(data['title'])}</strong>"
-            f"<span>{html.escape(created)} · {count} 句 · "
-            f"{int(data['duration'] / 60)} 分鐘</span></a>"
+            f'<span class="meta">{html.escape(created)} · {count} 句 · '
+            f"{duration}</span></a>"
+            f'<button class="delete" data-action="delete" '
+            f'data-episode="{html.escape(directory, quote=True)}" '
+            f'aria-label="刪除 {html.escape(data["title"], quote=True)}">刪除</button></article>'
         )
-    listing = "\n".join(items) or "<p>還沒有練習內容。先用 build 加入一集。</p>"
-    (root / "index.html").write_text(
-        f"""<!doctype html><html lang="zh-Hant"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>我的英文聽力練習</title>
-<style>body{{background:#fbf7f0;color:#242a2c;font-family:system-ui;max-width:850px;
-margin:50px auto;padding:0 24px}}h1{{font-family:Georgia,serif;font-weight:500}}
-.episode{{display:block;text-decoration:none;color:inherit;padding:20px;margin:14px 0;
-border:1px solid #ddd6cb;border-radius:12px;background:#fffdf9}}.episode:hover{{background:#e8f0eb}}
-strong{{font-size:20px;font-weight:600}}span{{display:block;margin-top:9px;color:#657071;font-size:13px}}
-</style><h1>我的英文聽力練習</h1><p>每天一集。點選內容開始離線練習。</p>{listing}</html>""",
-        encoding="utf-8",
+    listing = "\n".join(items) or '<p class="empty">還沒有練習內容。先用 build 加入一集。</p>'
+    recycled = list_trash(root)
+    trash_items = "\n".join(
+        f'<article class="episode"><div style="flex:1;min-width:0">'
+        f"<strong>{html.escape(row['title'])}</strong></div>"
+        f'<button data-action="restore" data-id="{html.escape(row["id"], quote=True)}" '
+        f'aria-label="復原 {html.escape(row["title"], quote=True)}">復原</button></article>'
+        for row in recycled
     )
+    template = files("podcast_practice").joinpath("assets/library.html").read_text(encoding="utf-8")
+    config = json.dumps({"token": token}).replace("</", "<\\/")
+    return (
+        template.replace("__EPISODE_ITEMS__", listing)
+        .replace("__TRASH_ITEMS__", trash_items or '<p class="empty">回收區是空的。</p>')
+        .replace("__TRASH_COUNT__", str(len(recycled)))
+        .replace("__LIBRARY_CONFIG__", config)
+    )
+
+
+def update_library(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.html").write_text(library_html(root), encoding="utf-8")
