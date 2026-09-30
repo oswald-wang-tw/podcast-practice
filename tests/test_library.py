@@ -7,7 +7,7 @@ import pytest
 
 from podcast_practice.cli import main
 from podcast_practice.errors import PracticeError
-from podcast_practice.library import delete_episode, list_trash, restore_episode
+from podcast_practice.library import delete_episode, list_trash, purge_episode, restore_episode
 from podcast_practice.render import library_html
 from podcast_practice.server import library_server
 
@@ -100,6 +100,65 @@ def test_cli_delete_list_and_restore_work_without_mfa(tmp_path, capsys):
     assert folder.is_dir()
 
 
+def test_purge_requires_confirmation_and_removes_only_the_selected_trash_entry(tmp_path):
+    root = tmp_path / "library"
+    first = delete_episode(root, make_episode(root, "first").name)
+    second = delete_episode(root, make_episode(root, "second").name)
+    original = tmp_path / "original.mp3"
+    original.write_bytes(b"keep original")
+    cache = tmp_path / ".runtime" / "jobs" / "example"
+    cache.mkdir(parents=True)
+    (cache / "episode.wav").write_bytes(b"keep cache")
+    with pytest.raises(PracticeError, match="確認"):
+        purge_episode(root, first["id"])
+    assert (root / ".trash" / first["id"] / "episode" / "audio.mp3").is_file()
+    purge_episode(root, first["id"], confirmed=True)
+    assert not (root / ".trash" / first["id"]).exists()
+    assert [row["id"] for row in list_trash(root)] == [second["id"]]
+    assert original.read_bytes() == b"keep original"
+    assert (cache / "episode.wav").read_bytes() == b"keep cache"
+    with pytest.raises(PracticeError, match="找不到"):
+        restore_episode(root, first["id"])
+
+
+@pytest.mark.parametrize("identifier", ["../outside", "/tmp", ".trash", "a" * 31, None])
+def test_purge_rejects_invalid_ids(tmp_path, identifier):
+    root = tmp_path / "library"
+    make_episode(root)
+    with pytest.raises(PracticeError, match="ID"):
+        purge_episode(root, identifier, confirmed=True)
+    assert (root / "test-episode" / "audio.mp3").is_file()
+
+
+def test_purge_does_not_follow_symlinks_into_original_files(tmp_path):
+    root = tmp_path / "library"
+    record = delete_episode(root, make_episode(root).name)
+    external = tmp_path / "outside"
+    external.mkdir()
+    protected = external / "original.txt"
+    protected.write_text("keep this")
+    entry = root / ".trash" / record["id"]
+    (entry / "episode" / "linked-folder").symlink_to(external, target_is_directory=True)
+    purge_episode(root, record["id"], confirmed=True)
+    assert protected.read_text() == "keep this"
+    linked = root / ".trash" / ("a" * 32)
+    linked.symlink_to(external, target_is_directory=True)
+    with pytest.raises(PracticeError, match="符號連結"):
+        purge_episode(root, linked.name, confirmed=True)
+    assert protected.read_text() == "keep this"
+
+
+def test_cli_purge_refuses_without_yes_then_removes_the_entry(tmp_path, capsys):
+    root = tmp_path / "library"
+    record = delete_episode(root, make_episode(root).name)
+    args = ["purge", record["id"], "--library", str(root)]
+    assert main(args) == 2
+    assert "--yes" in capsys.readouterr().err
+    assert len(list_trash(root)) == 1
+    assert main(args + ["--yes"]) == 0
+    assert list_trash(root) == []
+
+
 def test_server_requires_token_and_origin_then_deletes_and_restores(tmp_path):
     root = tmp_path / "library"
     folder = make_episode(root)
@@ -126,6 +185,7 @@ def test_server_requires_token_and_origin_then_deletes_and_restores(tmp_path):
         headers["X-Practice-Token"] = token
         headers["Origin"] = "https://example.com"
         assert post("/api/delete", {"episode": folder.name}, headers)[0] == 403
+        assert post("/api/purge", {"id": "a" * 32, "confirm": True}, headers)[0] == 403
         assert folder.is_dir()
         headers["Origin"] = origin
         assert post("/api/delete", {"episode": "../outside"}, headers)[0] == 400
@@ -138,6 +198,14 @@ def test_server_requires_token_and_origin_then_deletes_and_restores(tmp_path):
         response.read()
         assert post("/api/restore", {"id": record["id"]}, headers)[0] == 200
         assert folder.is_dir()
+        status, record = post("/api/delete", {"episode": folder.name}, headers)
+        assert status == 200
+        assert post("/api/purge", {"id": record["id"]}, headers)[0] == 400
+        assert post("/api/purge", {"id": record["id"], "confirm": "true"}, headers)[0] == 400
+        assert len(list_trash(root)) == 1
+        assert post("/api/purge", {"id": record["id"], "confirm": True}, headers)[0] == 200
+        assert list_trash(root) == []
+        assert not (root / ".trash" / record["id"]).exists()
     finally:
         connection.close()
         server.shutdown()

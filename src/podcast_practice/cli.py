@@ -12,7 +12,7 @@ from filelock import Timeout
 
 from . import __version__
 from .errors import PracticeError
-from .library import delete_episode, list_trash, restore_episode
+from .library import delete_episode, list_trash, purge_episode, restore_episode
 from .pipeline import BuildOptions, build
 from .render import render_player, update_library
 from .runtime import MODELS, Runtime
@@ -66,6 +66,10 @@ def parser() -> argparse.ArgumentParser:
     restore = sub.add_parser("restore", help="用回收區 ID 復原一集")
     restore.add_argument("id")
     restore.add_argument("--library", type=Path, default=Path("library"))
+    purge = sub.add_parser("purge", help="永久刪除回收區的一集，無法復原")
+    purge.add_argument("id")
+    purge.add_argument("--library", type=Path, default=Path("library"))
+    purge.add_argument("--yes", action="store_true", help="確認永久刪除，無法復原")
     return command
 
 
@@ -80,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                 if args.open:
                     webbrowser.open(url)
                 server.serve_forever()
-        elif args.command in {"delete", "trash", "restore"}:
+        elif args.command in {"delete", "trash", "restore", "purge"}:
             root = args.library.expanduser().resolve()
             if args.command == "trash":
                 rows = list_trash(root)
@@ -92,9 +96,12 @@ def main(argv: list[str] | None = None) -> int:
                 if args.command == "delete":
                     record = delete_episode(root, args.episode)
                     print(f"已移到回收區：{record['title']}\n復原 ID：{record['id']}")
-                else:
+                elif args.command == "restore":
                     record = restore_episode(root, args.id)
                     print(f"已復原：{record['title']}")
+                else:
+                    record = purge_episode(root, args.id, confirmed=args.yes)
+                    print(f"已永久刪除：{record['title']}，無法復原。")
                 update_library(root)
         elif args.command == "render":
             folder = args.episode.expanduser().resolve()

@@ -76,6 +76,14 @@ uv run podcast-practice trash
 uv run podcast-practice restore <回收區列出的ID>
 ```
 
+回收區每集旁有「永久刪除」。確認視窗會顯示該集名稱與刪除範圍；確認後，該集播放器、音訊副本、字幕等輸出會實際刪除，無法從回收區復原。原始輸入、共用模型與 `.runtime/jobs/` 處理快取仍保留。
+
+命令列必須明確加上 `--yes` 才會永久刪除：
+
+```sh
+uv run podcast-practice purge <回收區列出的ID> --yes
+```
+
 自訂練習庫可加 `--library /path/to/library`。同名資料夾已存在時會拒絕復原，以免覆寫其他練習。
 
 ## Transcript 建議格式

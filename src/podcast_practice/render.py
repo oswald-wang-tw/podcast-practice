@@ -153,7 +153,11 @@ def library_html(root: Path, token: str | None = None) -> str:
         f'<article class="episode"><div style="flex:1;min-width:0">'
         f"<strong>{html.escape(row['title'])}</strong></div>"
         f'<button data-action="restore" data-id="{html.escape(row["id"], quote=True)}" '
-        f'aria-label="復原 {html.escape(row["title"], quote=True)}">復原</button></article>'
+        f'aria-label="復原 {html.escape(row["title"], quote=True)}">復原</button>'
+        f'<button class="delete" data-action="purge" '
+        f'data-id="{html.escape(row["id"], quote=True)}" '
+        f'data-title="{html.escape(row["title"], quote=True)}" '
+        f'aria-label="永久刪除 {html.escape(row["title"], quote=True)}">永久刪除</button></article>'
         for row in recycled
     )
     template = files("podcast_practice").joinpath("assets/library.html").read_text(encoding="utf-8")

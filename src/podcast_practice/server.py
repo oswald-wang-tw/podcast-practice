@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlsplit
 from filelock import Timeout
 
 from .errors import PracticeError
-from .library import delete_episode, restore_episode
+from .library import delete_episode, purge_episode, restore_episode
 from .render import library_html, update_library
 
 
@@ -48,7 +48,7 @@ class LibraryHandler(SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_POST(self):
-        if self.path not in {"/api/delete", "/api/restore"}:
+        if self.path not in {"/api/delete", "/api/restore", "/api/purge"}:
             self.reply_json(404, {"error": "找不到此操作。"})
             return
         expected_origin = f"http://127.0.0.1:{self.server.server_port}"
@@ -69,8 +69,12 @@ class LibraryHandler(SimpleHTTPRequestHandler):
                 raise PracticeError("請求內容必須是 JSON 物件。")
             if self.path == "/api/delete":
                 result = delete_episode(self.root, body.get("episode"))
-            else:
+            elif self.path == "/api/restore":
                 result = restore_episode(self.root, body.get("id"))
+            else:
+                result = purge_episode(
+                    self.root, body.get("id"), confirmed=body.get("confirm") is True
+                )
             update_library(self.root)
             self.reply_json(200, result)
         except (PracticeError, OSError, ValueError, Timeout) as exc:

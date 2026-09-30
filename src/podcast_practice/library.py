@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,23 +73,47 @@ def delete_episode(root: Path, name: str) -> dict:
         return record
 
 
-def restore_episode(root: Path, identifier: str) -> dict:
-    root = root.expanduser().resolve()
+def trash_entry(root: Path, identifier: str) -> tuple[Path, dict]:
     if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
         raise PracticeError("無效的回收區 ID。")
+    source = trash_root(root) / identifier
+    if (
+        source.is_symlink()
+        or (source / "episode").is_symlink()
+        or (source / "metadata.json").is_symlink()
+    ):
+        raise PracticeError("不能操作回收區的符號連結。")
+    try:
+        record = json.loads((source / "metadata.json").read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise PracticeError("回收區找不到這集，可能已經復原或永久刪除。") from exc
+    if not isinstance(record, dict) or not isinstance(record.get("title"), str):
+        raise PracticeError("回收區資料格式不正確。")
+    episode_path(root, record.get("directory"))
+    read_episode(source / "episode")
+    record["id"] = identifier
+    return source, record
+
+
+def restore_episode(root: Path, identifier: str) -> dict:
+    root = root.expanduser().resolve()
     with FileLock(str(root / ".library.lock"), timeout=10):
-        source = trash_root(root) / identifier
-        if source.is_symlink() or (source / "episode").is_symlink():
-            raise PracticeError("不能復原符號連結。")
-        try:
-            record = json.loads((source / "metadata.json").read_text(encoding="utf-8"))
-        except FileNotFoundError as exc:
-            raise PracticeError("回收區找不到這集，可能已經復原。") from exc
+        source, record = trash_entry(root, identifier)
         destination = episode_path(root, record.get("directory"))
         if destination.exists():
             raise PracticeError("練習庫已有同名資料夾，請先移走它再復原。")
-        read_episode(source / "episode")
         (source / "episode").rename(destination)
         (source / "metadata.json").unlink()
         source.rmdir()
+        return record
+
+
+def purge_episode(root: Path, identifier: str, *, confirmed: bool = False) -> dict:
+    """Remove exactly one validated trash entry, never its original input files."""
+    if confirmed is not True:
+        raise PracticeError("永久刪除無法復原。請確認此操作；命令列需加上 --yes。")
+    root = root.expanduser().resolve()
+    with FileLock(str(root / ".library.lock"), timeout=10):
+        source, record = trash_entry(root, identifier)
+        shutil.rmtree(source)
         return record
