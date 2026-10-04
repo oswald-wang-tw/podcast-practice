@@ -1,25 +1,34 @@
 # Podcast Practice
 
-用 **uv + Montreal Forced Aligner（MFA）**，把每天不同的英文 podcast 與 transcript 做成離線聽力練習。點句跳播、逐字反白、慢速、單句循環、句尾暫停、隱藏原稿與搜尋都在播放器中完成。
+Turn English podcasts and their transcripts into offline listening practice with
+**uv + Montreal Forced Aligner (MFA)**. The player supports click-to-seek sentences,
+word highlighting, slower playback, sentence looping, pausing at sentence boundaries,
+transcript hiding, search, and keyboard shortcuts.
 
-每集輸出一個內嵌音檔的 `player.html`，以及 SRT/VTT、逐字 JSON、TextGrid。所有音訊分析在本機執行，沒有 SaaS、API key 或訂閱。只有首次安裝／模型下載需要網路。
+Each episode produces a portable `player.html` with embedded audio, SRT/VTT subtitles,
+word timestamps in JSON, and a TextGrid. All audio analysis runs locally, with no SaaS,
+API keys, or subscriptions. Network access is needed for the initial setup and model
+downloads.
 
-## 首次安裝（Linux）
+## Initial setup
 
-支援 **Linux x86_64**（建議 Ubuntu 22.04/24.04 或相容系統），以及 macOS 14 以上的 Intel / Apple Silicon。Linux ARM 與 Windows 尚未提供自動安裝；程式會明確提示，不會嘗試錯誤的平台套件。
+Automatic setup supports **Linux x86_64** (Ubuntu 22.04/24.04 or a compatible
+distribution is recommended) and macOS 14 or later on Intel and Apple Silicon.
+Linux ARM and Windows are not supported by automatic setup; the tool reports an
+unsupported platform instead of attempting to install incompatible packages.
 
-1. 安裝 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 Git。
-2. Clone repo，進入目錄：
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git.
+2. Clone the repository and set up the local runtime:
 
 ```sh
-git clone <你的遠端網址> podcast-practice
+git clone https://github.com/oswald-wang-tw/podcast-practice.git
 cd podcast-practice
 uv sync --locked
 uv run podcast-practice setup
 uv run podcast-practice doctor
 ```
 
-目前如果只有本機 repo，可先把 `podcast-practice.bundle` 複製到另一台電腦：
+You can also transfer an exported Git bundle to another computer:
 
 ```sh
 git clone /path/to/podcast-practice.bundle podcast-practice
@@ -28,67 +37,129 @@ uv sync --locked
 uv run podcast-practice setup
 ```
 
-**不必預先安裝 Python、Conda 或 ffmpeg。** uv 管理 Python 與本工具的依賴；`setup` 會下載官方 micromamba 2.9.0，在 `.runtime/` 建立 MFA 3.4.2、Kaldi 與 ffmpeg 的隔離環境，並下載英文 MFA / G2P 模型及本地粗定位模型 `base.en`。
+**You do not need to install Python, Conda, or ffmpeg separately.** uv manages Python
+and the project's Python dependencies. `setup` downloads the official micromamba
+2.9.0 binary, creates an isolated MFA 3.4.2 environment with Kaldi and ffmpeg under
+`.runtime/`, and downloads the English MFA/G2P models and the local `base.en` model
+used for coarse alignment.
 
-MFA 的原生依賴不能只靠 `uv pip install` 安裝。這個 repo 自動處理那一層，不修改系統 Python，也不需要每天手動 activate Conda。[MFA 官方安裝說明](https://montreal-forced-aligner.readthedocs.io/en/latest/installation.html)
+MFA's native dependencies cannot be installed with `uv pip install` alone. This
+repository manages that environment without modifying system Python or requiring
+you to activate Conda for daily use. See the
+[official MFA installation guide](https://montreal-forced-aligner.readthedocs.io/en/latest/installation.html).
 
-首次安裝請預留數 GB 磁碟空間，耗時取決於下載與電腦速度。之後模型會重用。
+Allow several GB of disk space for the initial setup. Download and installation
+times depend on your connection and computer; subsequent runs reuse the models.
 
-## 每天使用
+## Daily use
 
-把音檔和 UTF-8 transcript 存到任意位置，再執行：
+Save an audio file and its UTF-8 transcript, then run:
 
 ```sh
 uv run podcast-practice build /path/to/today.mp3 /path/to/today.txt \
-  --title "今天這集的名稱" --offline --open
+  --title "Today's episode" --offline --open
 ```
 
-下一天換兩個檔案即可，無須改程式：
+Use a different pair of files for the next episode, without changing the code:
 
 ```sh
 uv run podcast-practice build /path/to/another.m4a /path/to/another.txt \
-  --title "另一個 Podcast" --offline --open
+  --title "Another podcast" --offline --open
 ```
 
-- 音訊格式：ffmpeg 可讀取的 MP3、M4A、WAV、FLAC 等。
-- 原稿格式：英文 `.txt` / `.md`，或已有時間的 `.srt` / `.vtt`。`.md` 只支援文字段落與標題，不處理複雜 Markdown。
-- `--offline` 禁止粗定位模型下載；MFA 模型須先由 `setup` 安裝。實際推論始終在本地進行。
-- 每集以內容指紋建立獨立資料夾；換檔即產生新內容，重跑同一組輸入會使用已完成結果。
-- `--open` 完成後用系統預設瀏覽器開啟。也可直接開啟產生的 HTML，不需要 server。
+- Audio: MP3, M4A, WAV, FLAC, and other formats supported by ffmpeg.
+- Transcripts: English `.txt` or `.md`, or timestamped `.srt` or `.vtt` files.
+  Markdown support covers text paragraphs and headings, not complex formatting.
+- `--offline` prevents coarse-alignment model downloads. Install the MFA models with
+  `setup` first. Inference always runs locally.
+- Each episode gets a directory identified by a content fingerprint. Different
+  inputs create a new episode; rerunning the same inputs reuses completed results.
+- `--open` opens the finished player in your default browser. You can also open the
+  generated HTML directly, without a server.
 
-查看每天的練習庫：
+Browse your practice library:
 
 ```sh
 uv run podcast-practice serve --open
 ```
 
-只監聽 `127.0.0.1:8766`。按 Ctrl+C 結束；播放器仍可單獨離線使用。
+The server listens only on `127.0.0.1:8766`. Press Ctrl+C to stop it. Individual
+players remain usable offline after the server stops. Commands use `library/` in
+the current working directory by default; run them from the repository directory
+to use the same library.
 
-## 刪除與復原
+## Keyboard shortcuts
 
-練習庫中每集右側有「刪除」按鈕。刪除後可按「復原剛刪除的一集」，也可展開「回收區」復原；重新整理或重開服務後仍可復原。
+The player and library both have a shortcut-help button. Press `?` to open the
+shortcut list and `Esc` to close it. Letter shortcuts do not require Shift.
 
-刪除會將整集輸出移到 `library/.trash/`，不會刪除原始音檔、原稿、共用模型或對齊快取。回收區仍占用磁碟空間。直接用 `file://` 開啟 index.html 時，刪除與復原按鈕會停用；請使用 `serve`，或在命令列操作：
+| Player shortcut | Action |
+| --- | --- |
+| Space | Play / pause |
+| Left / Right arrow | Previous / next sentence |
+| Shift + Left / Right arrow | Seek backward / forward by 5 seconds |
+| `R` | Replay the selected sentence |
+| `[` / `]` | Decrease / increase playback speed |
+| `L` | Toggle sentence looping |
+| `P` | Toggle pausing at the end of a sentence |
+| `F` | Toggle automatic transcript following |
+| `H` | Hide / show the full transcript |
+| `V` | Reveal / hide the current sentence while the transcript is hidden |
+| `/` | Focus search and select the current search text |
+| `Esc` in search | Clear the search and leave the search field |
+| `?` | Open the shortcut list |
+
+In the library, use Up / Down arrow to select an episode, Home / End to move to the
+first / last episode, and Enter to open the selected episode. These navigation
+shortcuts work when focus is on the page or an episode link.
+
+Tab moves between controls. Space activates a focused button. Shortcuts leave text
+input, form controls, input-method composition, and Ctrl / Alt / Command
+combinations to their normal behavior. Holding a toggle key changes the option
+only once; navigation, seeking, and speed shortcuts can repeat.
+
+Update an existing episode's player without rerunning alignment:
+
+```sh
+uv run podcast-practice render library/episode-name-xxxxxxxx
+```
+
+## Delete and restore episodes
+
+Each episode in the library has a delete button. After deletion, use the undo
+button or expand the trash section to restore it. Restoration remains available
+after reloading the page or restarting the server.
+
+Deleting an episode moves its entire output directory to `library/.trash/`. It
+preserves original audio and transcript inputs, shared models, and alignment
+caches. Items in the trash still use disk space. Delete and restore buttons are
+disabled when opening `index.html` through `file://`; use `serve` or the CLI:
 
 ```sh
 uv run podcast-practice delete episode-name-xxxxxxxx
 uv run podcast-practice trash
-uv run podcast-practice restore <回收區列出的ID>
+uv run podcast-practice restore <trash-id>
 ```
 
-回收區每集旁有「永久刪除」。確認視窗會顯示該集名稱與刪除範圍；確認後，該集播放器、音訊副本、字幕等輸出會實際刪除，無法從回收區復原。原始輸入、共用模型與 `.runtime/jobs/` 處理快取仍保留。
+Each item in the trash also has a permanent-delete button. Its confirmation dialog
+shows the episode title and deletion scope. Confirming permanently removes that
+episode's player, audio copy, subtitles, and other outputs; it cannot be restored
+from the trash. Original inputs, shared models, and processing caches under
+`.runtime/jobs/` are preserved.
 
-命令列必須明確加上 `--yes` 才會永久刪除：
+The CLI requires an explicit `--yes` to delete an item permanently:
 
 ```sh
-uv run podcast-practice purge <回收區列出的ID> --yes
+uv run podcast-practice purge <trash-id> --yes
 ```
 
-自訂練習庫可加 `--library /path/to/library`。同名資料夾已存在時會拒絕復原，以免覆寫其他練習。
+Use `--library /path/to/library` for a custom library. Restoration refuses to
+overwrite an existing directory with the same name.
 
-## Transcript 建議格式
+## Transcript format
 
-不需自己加時間。可以是正常英文段落，或講者標題：
+Plain transcripts do not need timestamps. Use normal English paragraphs, optionally
+with speaker headings:
 
 ```text
 Host
@@ -102,82 +173,114 @@ Thanks for having me. Let me explain how it works.
 Host: What should listeners try first?
 ```
 
-講者名稱會自動偵測，必要時可重複傳入 `--speaker "Alex Taylor"` 明確指定。
-`[MUSIC PLAYING]`、`[AD PLAYING]` 等標記不會當成口說內容；一般 URL、Markdown 標題、FT 分享提示會略過。附件中的文字只作為資料，不會執行其中的命令或指示。
+Speaker names are detected automatically. If needed, repeat `--speaker "Alex Taylor"`
+to specify speakers explicitly.
 
-顯示文字保留原稿；對齊輸入會展開數字、百分比、年份及大寫縮寫。若數字／縮寫的實際念法與自動展開不同，可在輸入原稿中寫成實際英文念法。語言目前限英文。
+Markers such as `[MUSIC PLAYING]` and `[AD PLAYING]` are excluded from spoken text.
+URLs, Markdown headings, and FT sharing prompts are also skipped. Transcript files
+are treated as data; commands or instructions inside them are never executed.
 
-## 每集輸出
+The displayed transcript preserves the original wording. Alignment input expands
+numbers, percentages, years, and uppercase abbreviations into spoken English. If
+the recording uses a different pronunciation, write the intended spoken form in
+the input transcript. Only English is currently supported.
+
+## Episode outputs
 
 ```text
 library/
   index.html
   episode-name-xxxxxxxx/
-    player.html         # 音檔內嵌，這一個檔案即可跨電腦離線練習
+    player.html         # Embedded audio; portable offline practice in one file
     audio.mp3
     transcript.txt
     subtitles.srt
     subtitles.vtt
-    alignment.json      # 原文、講者、逐字／逐句時間、模型資訊
+    alignment.json      # Original text, speakers, word/sentence times, model metadata
     alignment.TextGrid
-    review.json         # 建議人工核對的區段
-    windows.json        # MFA 分句搜尋範圍，可手動修改
+    review.json         # Segments recommended for manual review
+    windows.json        # MFA sentence search windows; can be edited manually
 ```
 
-可用 `--output /path/to/episode` 指定單集目錄。音檔、原稿、模型、`.venv`、處理快取與練習庫都被 `.gitignore` 排除，**clone 只帶程式與 uv.lock**。
+Use `--output /path/to/episode` to choose an episode's output directory. Audio,
+transcripts, models, `.venv`, processing caches, and libraries are excluded by
+`.gitignore`; cloning the repository does not transfer those local files.
 
-## 對齊流程
+## Alignment workflow
 
-1. 保留顯示原文，同時建立英文發音正規化輸入。
-2. 只為字典沒有的新單字產生 G2P 發音，跨集快取，避免重算整篇發音。
-3. MFA 先對整集對齊。
-4. 本地 faster-whisper 辨識音訊，將可匹配的字詞作為粗定位，用來排除音樂、廣告及未附原稿的尾段。
-5. MFA 在自動取得的句子搜尋範圍內重新對齊，產生最終逐字時間。
-6. 驗證字詞完整性與時間順序，再輸出播放器、字幕及核對報告。
+1. Preserve the original display text and create normalized English pronunciation
+   input.
+2. Generate G2P pronunciations only for words missing from the dictionary. Cache
+   them across episodes to avoid repeating work.
+3. Run an initial MFA alignment over the full episode.
+4. Run local faster-whisper recognition and match words to estimate coarse speech
+   locations, excluding music, ads, and trailing audio missing from the transcript.
+5. Run MFA again within the estimated sentence search windows to produce the final
+   word timestamps.
+6. Validate word completeness and timestamp ordering, then export the player,
+   subtitles, and review report.
 
-已有 SRT/VTT 時使用其時間作為搜尋範圍，不需粗定位辨識。**最終逐字時間都來自 MFA；粗定位辨識不會替換你的 transcript。**
+For SRT/VTT input, the supplied timestamps define search windows, so coarse
+recognition is unnecessary. **Final word timestamps always come from MFA. Coarse
+recognition does not replace your transcript.**
 
-無需為每一集寫固定的音樂時間、講者清單或絕對檔案路徑。音檔與原稿的粗定位吻合率低於 35% 時，工具會停止並提示核對；若原稿確實經過大幅編輯，可加 `--allow-low-confidence` 繼續。
+You do not need to hardcode music timestamps, speaker lists, or absolute file paths
+for each episode. The tool stops and asks you to check the inputs when coarse word
+match coverage falls below 35%. If the transcript is deliberately edited, you can
+continue with `--allow-low-confidence`.
 
-這仍是自動對齊，不能保證每個字都準確。播放器會標示建議核對的句子；原稿缺漏、背景音樂、改寫內容或特殊發音可能需要人工調整。
+Automatic alignment can still produce inaccurate word boundaries. The player marks
+sentences recommended for review. Missing transcript content, background music,
+edited wording, and unusual pronunciations may require manual adjustment.
 
-## 調整與故障排除
+## Configuration and troubleshooting
 
-模型較小、較快的選擇：
+Choose a smaller, faster coarse-alignment model:
 
 ```sh
 uv run podcast-practice setup --asr-model tiny.en
 ```
 
-`build` 預設沿用 setup 的模型。可用 `--asr-model small.en` 選更大的模型；先下載後才能加 `--offline`。
+`build` uses the model selected during setup by default. Use `--asr-model small.en`
+for a larger model; download it before using `--offline`.
 
-已有 MFA／模型時可重用，不重新下載（只記錄在本機 `.runtime/config.json`）：
+Reuse an existing MFA environment and model directories without downloading them
+again. These paths are stored locally in `.runtime/config.json`:
 
 ```sh
 uv run podcast-practice setup --mfa-prefix /path/to/mfa-env \
   --model-dir /path/to/MFA --asr-cache /path/to/asr-cache
 ```
 
-不使用粗定位模型：`build ... --no-asr`。這時需自行核對音樂與尾段；有 SRT/VTT 的輸入仍使用提供的時間。
+Use `build ... --no-asr` to skip coarse recognition. Check music and trailing audio
+boundaries yourself in that mode. Timestamped SRT/VTT input still uses its supplied
+times.
 
-修正某一句：複製該集的 `windows.json`，修改那句的 `begin` / `end`（秒），然後執行：
+To correct a sentence, copy the episode's `windows.json`, edit its `begin` and `end`
+values in seconds, and run:
 
 ```sh
 uv run podcast-practice build /path/to/today.mp3 /path/to/today.txt \
-  --title "今天這集的名稱" --windows /path/to/windows.json --offline
+  --title "Today's episode" --windows /path/to/windows.json --offline
 ```
 
-也可只放需修改的項目，例如 `[{"id": 7, "begin": 41.0, "end": 45.0}]`；`id` 從 0 開始。時間不能超出音檔或與相鄰句子重疊。
+You can supply only the entries you want to change, such as
+`[{"id": 7, "begin": 41.0, "end": 45.0}]`. Sentence IDs start at 0. Windows must stay
+within the audio duration and must not overlap neighboring sentences.
 
-更新播放器樣式，不重新跑對齊：
+Refresh the player without rerunning alignment:
 
 ```sh
 uv run podcast-practice render library/episode-name-xxxxxxxx
 ```
 
-`--force` 允許覆寫輸出，仍保留相同輸入的計算快取。若要重新計算同一集，可移走該集 `.runtime/jobs/<指紋>/` 後重跑。失敗或 Ctrl+C 會保留處理快取；詳細 log 在該工作目錄。
+`--force` allows output replacement while preserving computation caches for the same
+inputs. To recompute an episode from scratch, move its
+`.runtime/jobs/<fingerprint>/` cache directory out of the way before rebuilding.
+Failures and Ctrl+C preserve processing caches; detailed logs remain in the job
+directory.
 
-## 開發與測試
+## Development and tests
 
 ```sh
 uv sync --locked --group dev
@@ -185,8 +288,22 @@ uv run pytest
 uv run ruff check .
 ```
 
-測試涵蓋不同原稿、數字／講者解析、音樂與尾段的自動範圍、錯誤／重疊時間拒絕、輸出原文完整性及 HTML 跳脫。普通測試不下載語音模型，也不需要 MFA。
+Tests cover transcript formats, number and speaker parsing, automatic speech
+windows, invalid or overlapping windows, original-text preservation, HTML escaping,
+and player and library keyboard behavior. The regular test suite does not download
+speech models or require MFA. Real-audio alignment quality still needs listening
+checks on the target machine.
 
-已在 macOS 實際跑通完整 MP3／原稿，以及不同長度的 M4A／原稿，並驗證播放器。Linux x86_64 的固定版本下載網址與 Conda 套件解算已確認可用；目前尚未在 Linux 主機完成實際對齊測試。
+Keyboard regression tests use Node.js without npm dependencies. When Node.js is
+available, pytest runs them automatically; otherwise that test is skipped. You can
+also run them directly:
 
-套件程式碼在 `src/podcast_practice/`，通用播放器在 `assets/player.html`。工具版本與 Python 依賴鎖定在 `pyproject.toml` / `uv.lock`；MFA 原生套件固定 3.4.2，其 transitive Conda 依賴由 conda-forge 解算，未假裝由 uv.lock 管理。
+```sh
+node --test tests/keyboard.test.cjs
+```
+
+Package code lives in `src/podcast_practice/`; the reusable player template is
+`src/podcast_practice/assets/player.html`. Python dependencies are locked in
+`uv.lock`, and tool versions are defined in the runtime code. MFA is pinned to
+3.4.2; its transitive native dependencies are resolved through conda-forge and are
+not managed by `uv.lock`.

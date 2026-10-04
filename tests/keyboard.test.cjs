@@ -1,0 +1,221 @@
+// Run the shipped inline scripts with a small DOM fixture; no npm dependencies.
+const assert = require('node:assert/strict');
+const {readFileSync} = require('node:fs');
+const {join} = require('node:path');
+const {test} = require('node:test');
+const vm = require('node:vm');
+
+class Classes {
+  constructor() { this.values = new Set(); }
+  add(value) { this.values.add(value); }
+  remove(value) { this.values.delete(value); }
+  contains(value) { return this.values.has(value); }
+  toggle(value, force = !this.contains(value)) {
+    if (force) this.add(value); else this.remove(value);
+    return force;
+  }
+}
+
+function fixture(page = 'player') {
+  const html = readFileSync(join(__dirname, '../src/podcast_practice/assets', `${page}.html`), 'utf8');
+  const listeners = new Map(), elements = new Map(), timers = new Map();
+  let timerId = 0, plays = 0;
+  class Element {
+    constructor(tagName = 'div') {
+      this.tagName = tagName.toUpperCase();
+      this.classList = new Classes();
+      this.style = {}; this.dataset = {}; this.attributes = {}; this.children = [];
+      this.events = new Map(); this.checked = false; this.disabled = false;
+      this.hidden = false; this.open = false; this.isContentEditable = false;
+      this.selectedIndex = 0; this._value = ''; this._text = '';
+    }
+    set className(value) { this.classList.values = new Set(value.split(' ')); }
+    get className() { return [...this.classList.values].join(' '); }
+    set textContent(value) { this._text = String(value); this.children = []; }
+    get textContent() { return this._text + this.children.map(c => c.textContent ?? c).join(''); }
+    set value(value) {
+      if (this.options) this.selectedIndex = this.options.findIndex(o => o.value === String(value));
+      else this._value = String(value);
+    }
+    get value() { return this.options ? this.options[this.selectedIndex]?.value : this._value; }
+    append(...children) { for (const child of children) { if (typeof child !== 'string') child.parent = this; this.children.push(child); } }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    addEventListener(key, fn) { const list = this.events.get(key) || []; list.push(fn); this.events.set(key, list); }
+    dispatchEvent(event) { event.target ??= this; for (const fn of this.events.get(event.type) || []) fn(event); }
+    click() {
+      if (this.disabled) return;
+      if (this.type === 'checkbox') this.checked = !this.checked;
+      this.dispatchEvent({type: 'click'});
+      if (this.type === 'checkbox') this.dispatchEvent({type: 'change'});
+    }
+    closest(selector) {
+      for (let el = this; el; el = el.parent) {
+        for (const part of selector.split(',')) {
+          if (part === '#episodes a' && el.tagName === 'A' && el.parent?.id === 'episodes') return el;
+          if (part === '[role="textbox"]' && el.attributes.role === 'textbox') return el;
+          if (part === '[role="button"]:not(.sentence)' && el.attributes.role === 'button' && !el.classList.contains('sentence')) return el;
+          if (part.toUpperCase() === el.tagName) return el;
+        }
+      }
+      return null;
+    }
+    focus() { document.activeElement = this; }
+    blur() { document.activeElement = document.body; }
+    select() { this.selection = [0, this.value.length]; }
+    showModal() { this.open = true; }
+    close() { this.open = false; }
+    scrollIntoView() {}
+    getBoundingClientRect() { return {top: 300, bottom: 400}; }
+  }
+  for (const match of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)) {
+    const el = new Element(match[1]); el.id = match[2];
+    if (match[0].includes('type="checkbox"')) el.type = 'checkbox';
+    el.hidden = /\bhidden\b/.test(match[0]); el.checked = /\bchecked\b/.test(match[0]);
+    elements.set(el.id, el);
+  }
+  const document = {
+    body: new Element('body'), documentElement: new Element('html'),
+    getElementById: id => elements.get(id),
+    createElement: tag => new Element(tag),
+    addEventListener: (key, fn) => { const list = listeners.get(key) || []; list.push(fn); listeners.set(key, list); },
+    querySelector: selector => selector === 'dialog[open]' ? [...elements.values()].find(el => el.tagName === 'DIALOG' && el.open) : null,
+    querySelectorAll: selector => selector === '#episodes a' ? elements.get('episodes').children : [],
+  };
+  document.activeElement = document.body;
+  const data = {
+    title: 'Keyboard fixture', duration: 20, review: {warnings: []}, chapters: [{title: 'Start', sentence: 0}],
+    sentences: [1, 6, 12].map((start, id) => ({id, start, end: start + 2, speaker: 'Host', text: `Sentence ${id}`, words: [{text: `word${id}`, start, end: start + 1}]})),
+  };
+  if (page === 'player') {
+    elements.get('alignment-data').textContent = JSON.stringify(data);
+    const audio = elements.get('audio'); audio.paused = true; audio.currentTime = 0;
+    audio.play = async () => { plays++; audio.paused = false; audio.dispatchEvent({type: 'play'}); };
+    audio.pause = () => { const playing = !audio.paused; audio.paused = true; if (playing) audio.dispatchEvent({type: 'pause'}); };
+    elements.get('speed').options = ['0.6', '0.75', '0.85', '1', '1.1', '1.25'].map(value => ({value, textContent: `${value}×`}));
+    elements.get('speed').value = '1'; elements.get('gap').value = '1';
+  } else {
+    elements.get('library-config').textContent = JSON.stringify({token: null});
+    for (let i = 0; i < 3; i++) { const link = new Element('a'); link.id = `episode-${i}`; elements.get('episodes').append(link); }
+  }
+  const context = {
+    document, window: {innerHeight: 1000}, location: {protocol: 'http:'},
+    Event: class { constructor(type) { this.type = type; } },
+    requestAnimationFrame: () => {},
+    setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
+    clearTimeout: id => timers.delete(id),
+  };
+  vm.runInNewContext(html.match(/<script>\s*([\s\S]*?)<\/script>/)[1], context);
+  function key(key, options = {}) {
+    const event = {key, code: key === ' ' ? 'Space' : key, target: document.activeElement, preventDefault() { this.defaultPrevented = true; }, ...options};
+    event.target.dispatchEvent({...event, type: 'keydown'});
+    for (const fn of listeners.get('keydown') || []) fn(event);
+    return event;
+  }
+  return {key, elements, document, data, timers, get plays() { return plays; }, Element};
+}
+
+test('sentence navigation stops at the ends, replay works, and seeking stays in bounds', () => {
+  const f = fixture(), audio = f.elements.get('audio');
+  f.key('ArrowLeft'); assert.equal(f.plays, 0);
+  f.key('ArrowRight'); assert.equal(audio.currentTime, 5.9);
+  f.key('ArrowRight'); assert.equal(audio.currentTime, 11.9);
+  f.key('ArrowRight'); assert.equal(f.plays, 2);
+  audio.currentTime = 13; f.key('r'); assert.equal(audio.currentTime, 11.9);
+  for (let i = 0; i < 5; i++) f.key('ArrowRight', {shiftKey: true});
+  assert.equal(audio.currentTime, 20);
+  for (let i = 0; i < 5; i++) f.key('ArrowLeft', {shiftKey: true});
+  assert.equal(audio.currentTime, 0);
+});
+
+test('speed changes use the existing choices and stop at their limits', () => {
+  const f = fixture(), speed = f.elements.get('speed'), audio = f.elements.get('audio');
+  f.key('['); assert.equal(speed.value, '0.85'); assert.equal(audio.playbackRate, 0.85);
+  for (let i = 0; i < 8; i++) f.key('[', {repeat: true});
+  assert.equal(speed.value, '0.6');
+  for (let i = 0; i < 8; i++) f.key(']', {repeat: true});
+  assert.equal(speed.value, '1.25'); assert.equal(audio.playbackRate, 1.25);
+});
+
+test('toggle keys run once when held and use mutually exclusive practice modes', () => {
+  const f = fixture(), get = id => f.elements.get(id);
+  f.key('l'); assert.equal(get('loop').checked, true);
+  f.key('l', {repeat: true}); assert.equal(get('loop').checked, true);
+  f.key('p'); assert.equal(get('pauseEnd').checked, true); assert.equal(get('loop').checked, false);
+  f.key('l'); assert.equal(get('loop').checked, true); assert.equal(get('pauseEnd').checked, false);
+  f.key('f'); assert.equal(get('follow').checked, false);
+  f.key('f', {repeat: true}); assert.equal(get('follow').checked, false);
+  f.key('H'); assert.equal(get('transcript').classList.contains('hidden-text'), true);
+  f.key('h', {repeat: true}); assert.equal(get('hide').attributes['aria-pressed'], 'true');
+  f.key('v'); assert.equal(get('reveal').attributes['aria-pressed'], 'true');
+  f.key('v'); assert.equal(get('reveal').attributes['aria-pressed'], 'false');
+});
+
+test('play and replay cancel a pending loop without leaving a timer behind', () => {
+  const f = fixture(), audio = f.elements.get('audio');
+  f.key('l'); f.key(' '); audio.currentTime = 3.1; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(f.timers.size, 1); assert.equal(audio.paused, true);
+  f.key(' '); assert.equal(f.timers.size, 0); assert.equal(audio.paused, true);
+  f.key(' '); assert.equal(audio.paused, false);
+  audio.currentTime = 3.1; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(f.timers.size, 1);
+  f.key('r'); assert.equal(f.timers.size, 0); assert.equal(audio.currentTime, 0.9);
+});
+
+test('slash focuses and selects search; Escape clears it and leaves search', () => {
+  const f = fixture(), search = f.elements.get('search'); search.value = 'word';
+  f.key('/'); assert.equal(f.document.activeElement, search); assert.deepEqual(search.selection, [0, 4]);
+  f.key('l'); assert.equal(f.elements.get('loop').checked, false);
+  f.key('ArrowRight'); assert.equal(f.plays, 0);
+  f.key('Escape'); assert.equal(search.value, ''); assert.equal(f.document.activeElement, f.document.body);
+});
+
+test('typing, composition, browser shortcuts, and prevented events do not trigger actions', () => {
+  for (const options of [{isComposing: true}, {keyCode: 229}, {ctrlKey: true}, {metaKey: true}, {altKey: true}, {defaultPrevented: true}]) {
+    const f = fixture(); f.key('l', options); assert.equal(f.elements.get('loop').checked, false);
+  }
+  for (const tag of ['input', 'textarea', 'select']) {
+    const f = fixture(); new f.Element(tag).focus(); f.key('l'); assert.equal(f.elements.get('loop').checked, false);
+  }
+  const f = fixture(), editable = new f.Element(); editable.isContentEditable = true; editable.focus();
+  f.key('l'); assert.equal(f.elements.get('loop').checked, false);
+});
+
+test('native Space activation is preserved for buttons, links, and nested button contents', () => {
+  const f = fixture(), button = f.elements.get('hide');
+  button.focus(); assert.equal(f.key(' ').defaultPrevented, undefined); assert.equal(f.plays, 0);
+  const child = new f.Element('kbd'); button.append(child); child.focus();
+  assert.equal(f.key(' ').defaultPrevented, undefined);
+  const link = new f.Element('a'); link.focus(); assert.equal(f.key(' ').defaultPrevented, undefined);
+  f.document.body.focus(); f.key(' '); assert.equal(f.plays, 1);
+  f.key(' ', {repeat: true}); assert.equal(f.elements.get('audio').paused, false);
+});
+
+test('help lists all shortcuts and keeps player commands out of an open dialog', () => {
+  const f = fixture(); assert.equal(f.elements.get('shortcut-list').children.length, 32);
+  f.key('?'); assert.equal(f.elements.get('shortcut-dialog').open, true);
+  f.key('l'); assert.equal(f.elements.get('loop').checked, false);
+  f.key('ArrowRight'); assert.equal(f.plays, 0);
+  f.elements.get('shortcut-close').click();
+  f.key('l'); assert.equal(f.elements.get('loop').checked, true);
+});
+
+test('library navigation focuses links and clamps to the first and last episodes', () => {
+  const f = fixture('library'), links = f.elements.get('episodes').children;
+  f.key('ArrowDown'); assert.equal(f.document.activeElement, links[0]);
+  f.key('ArrowDown'); assert.equal(f.document.activeElement, links[1]);
+  f.key('End'); assert.equal(f.document.activeElement, links[2]);
+  f.key('ArrowDown'); assert.equal(f.document.activeElement, links[2]);
+  f.key('Home'); assert.equal(f.document.activeElement, links[0]);
+  f.key('ArrowUp'); assert.equal(f.document.activeElement, links[0]);
+  f.document.body.focus(); f.key('ArrowUp'); assert.equal(f.document.activeElement, links[2]);
+});
+
+test('library keys leave form controls, deletion dialogs, and an empty library alone', () => {
+  const f = fixture('library'), button = new f.Element('button'); button.focus();
+  assert.equal(f.key('ArrowDown').defaultPrevented, undefined); assert.equal(f.document.activeElement, button);
+  f.elements.get('purge-dialog').showModal(); f.key('?'); assert.equal(f.elements.get('shortcut-dialog').open, false);
+  assert.equal(f.key('ArrowDown').defaultPrevented, undefined);
+  f.elements.get('purge-dialog').close(); f.document.body.focus();
+  f.key('?', {isComposing: true}); assert.equal(f.elements.get('shortcut-dialog').open, false);
+  f.elements.get('episodes').children = []; assert.equal(f.key('ArrowDown').defaultPrevented, undefined);
+});

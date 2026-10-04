@@ -8,17 +8,20 @@
 *{box-sizing:border-box}body{background:var(--paper);color:var(--ink);font-family:system-ui;max-width:900px;margin:50px auto;padding:0 24px 50px}h1{font-family:Georgia,serif;font-weight:500;font-size:36px;margin:12px 0}.brand{color:var(--green);font-size:12px;font-weight:700;letter-spacing:.12em}.intro,.help{color:var(--muted);line-height:1.7}.episode{display:flex;align-items:center;gap:18px;padding:20px;margin:14px 0;border:1px solid var(--line);border-radius:12px;background:#fffdf9}.episode a{min-width:0;flex:1;text-decoration:none;color:inherit}.episode a:hover strong{color:var(--green)}strong{display:block;font-size:20px;font-weight:600;overflow-wrap:anywhere}.meta{display:block;margin-top:9px;color:var(--muted);font-size:13px}button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 13px;background:#fffdf9;cursor:pointer;white-space:nowrap}button:hover{background:#e8f0eb}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible{outline:3px solid #619891;outline-offset:3px}.delete{color:#943f31}.notice{background:#e8f0eb;border-radius:10px;padding:14px 16px;margin:22px 0;display:flex;align-items:center;gap:16px}.notice span{flex:1;overflow-wrap:anywhere}.notice[hidden]{display:none}.notice.error{background:#f9e8df;color:#943f31}details{margin-top:32px;border-top:1px solid var(--line);padding-top:20px}summary{cursor:pointer;color:var(--muted);font-size:15px}.empty{color:var(--muted);padding:20px 0}.help{font-size:13px}#offline{margin-top:20px}
 @media(max-width:600px){body{margin-top:30px;padding:0 18px 40px}h1{font-size:29px}.episode{padding:16px;gap:12px}strong{font-size:18px}.notice{flex-wrap:wrap}.notice span{flex-basis:100%}}
 dialog{max-width:480px;width:calc(100% - 36px);border:1px solid var(--line);border-radius:14px;padding:26px;background:#fffdf9;color:var(--ink)}dialog::backdrop{background:#242a2c66}dialog h2{font-size:21px;margin:0 0 16px}dialog p{line-height:1.7;overflow-wrap:anywhere}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}#purge-confirm{background:#943f31;color:white;border-color:#943f31}@media(max-width:600px){#trash .episode{flex-wrap:wrap}#trash .episode>div{flex-basis:100%!important}}
+kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 6px;white-space:nowrap}.library-keys{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.library-keys button{font-size:13px}.episode:focus-within{border-color:#619891;background:#e8f0eb}#shortcut-dialog{max-height:85vh;overflow:auto}.shortcut-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.shortcut-heading h2{margin:0}.shortcut-list{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:12px 20px;font-size:14px;line-height:1.6}.shortcut-list dt,.shortcut-list dd{margin:0}.shortcut-list dd{align-self:center}
 </style>
 </head>
 <body>
 <div class="brand">LISTENING ROOM / MY LIBRARY</div>
 <h1>我的英文聽力練習</h1>
 <p class="intro">每天一集。點選內容開始離線練習。</p>
+<p class="help library-keys"><span><kbd>↑</kbd> <kbd>↓</kbd> 選集 · <kbd>Enter</kbd> 開啟</span><button id="shortcuts" title="顯示快捷鍵清單（?）" aria-keyshortcuts="?" aria-haspopup="dialog" aria-controls="shortcut-dialog">快捷鍵 <kbd>?</kbd></button></p>
 <div id="notice" class="notice" role="status" hidden><span id="message"></span><button id="undo" hidden>復原剛刪除的一集</button></div>
 <main id="episodes">__EPISODE_ITEMS__</main>
 <details id="trash-panel"><summary>回收區（<span id="trash-count">__TRASH_COUNT__</span>）</summary><p class="help">刪除的練習可以復原，或永久刪除以釋放該集輸出的空間。</p><div id="trash">__TRASH_ITEMS__</div></details>
 <p id="offline" class="help" hidden>請透過練習庫服務開啟此頁，才能刪除或復原內容。</p>
 <dialog id="purge-dialog" aria-labelledby="purge-title"><h2 id="purge-title">永久刪除這集？</h2><p id="purge-episode"></p><p>將刪除這集的播放器、音訊副本與字幕等輸出，無法從回收區復原。</p><p class="help">原始音檔、原稿、模型與處理快取會保留。</p><div class="dialog-actions"><button id="purge-cancel" autofocus>取消</button><button id="purge-confirm">確認永久刪除</button></div></dialog>
+<dialog id="shortcut-dialog" aria-labelledby="shortcut-title"><div class="shortcut-heading"><h2 id="shortcut-title">練習庫快捷鍵</h2><button id="shortcut-close" autofocus>關閉</button></div><dl class="shortcut-list"><dt><kbd>↑</kbd> / <kbd>↓</kbd></dt><dd>選取上一集／下一集</dd><dt><kbd>Home</kbd> / <kbd>End</kbd></dt><dd>選取第一集／最後一集</dd><dt><kbd>Enter</kbd></dt><dd>開啟目前選取的一集</dd><dt><kbd>?</kbd></dt><dd>顯示快捷鍵清單</dd><dt><kbd>Esc</kbd></dt><dd>關閉清單</dd></dl><p class="help">Tab 可依序移到連結與按鈕。選集快捷鍵在頁面或集數連結上使用；開啟對話框時保留對話框的鍵盤操作。</p></dialog>
 <script id="library-config" type="application/json">__LIBRARY_CONFIG__</script>
 <script>
 const config=JSON.parse(document.getElementById('library-config').textContent);
@@ -50,6 +53,20 @@ $('undo').addEventListener('click',event=>{event.stopPropagation();if(!lastDelet
 $('purge-cancel').addEventListener('click',()=>{$('purge-dialog').close();pendingPurge=null;});
 $('purge-dialog').addEventListener('cancel',()=>{pendingPurge=null;});
 $('purge-confirm').addEventListener('click',()=>{const button=pendingPurge;$('purge-dialog').close();pendingPurge=null;if(button)action(button,true);});
+$('shortcuts').addEventListener('click',()=>{$('shortcut-dialog').showModal();});
+$('shortcut-close').addEventListener('click',()=>{$('shortcut-dialog').close();});
+document.addEventListener('keydown',event=>{
+ if(event.defaultPrevented||event.isComposing||event.keyCode===229||event.metaKey||event.ctrlKey||event.altKey||document.querySelector('dialog[open]'))return;
+ if(event.target.isContentEditable||event.target.closest('input,select,textarea,[role="textbox"]'))return;
+ if(event.key==='?'){event.preventDefault();if(!event.repeat)$('shortcut-dialog').showModal();return;}
+ if(event.shiftKey||!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;
+ const current=event.target.closest('#episodes a');
+ if(!current&&event.target!==document.body&&event.target!==document.documentElement)return;
+ const links=Array.from(document.querySelectorAll('#episodes a'));if(!links.length)return;
+ const index=links.indexOf(current);
+ const next=event.key==='Home'?0:event.key==='End'?links.length-1:index<0?(event.key==='ArrowUp'?links.length-1:0):Math.max(0,Math.min(links.length-1,index+(event.key==='ArrowUp'?-1:1)));
+ event.preventDefault();links[next].focus();
+});
 </script>
 </body>
 </html>
