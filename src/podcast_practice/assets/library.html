@@ -9,6 +9,8 @@
 @media(max-width:600px){body{margin-top:30px;padding:0 18px 40px}h1{font-size:29px}.episode{padding:16px;gap:12px}strong{font-size:18px}.notice{flex-wrap:wrap}.notice span{flex-basis:100%}}
 dialog{max-width:480px;width:calc(100% - 36px);border:1px solid var(--line);border-radius:14px;padding:26px;background:#fffdf9;color:var(--ink)}dialog::backdrop{background:#242a2c66}dialog h2{font-size:21px;margin:0 0 16px}dialog p{line-height:1.7;overflow-wrap:anywhere}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}#purge-confirm{background:#943f31;color:white;border-color:#943f31}@media(max-width:600px){#trash .episode{flex-wrap:wrap}#trash .episode>div{flex-basis:100%!important}}
 kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 6px;white-space:nowrap}.library-keys{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.library-keys button{font-size:13px}.episode:focus-within{border-color:#619891;background:#e8f0eb}#shortcut-dialog{max-height:85vh;overflow:auto}.shortcut-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.shortcut-heading h2{margin:0}.shortcut-list{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:12px 20px;font-size:14px;line-height:1.6}.shortcut-list dt,.shortcut-list dd{margin:0}.shortcut-list dd{align-self:center}
+.upload{padding:24px;margin:26px 0;border:1px solid var(--line);border-radius:14px;background:#fffdf9}.upload h2{font-size:20px;margin:0 0 8px}.upload .help{margin:0 0 18px}.upload fieldset{border:0;padding:0;margin:0;min-width:0}.drop-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.drop-zone{display:flex;position:relative;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:22px 14px;border:2px dashed #c9cfc5;border-radius:10px;background:var(--paper);cursor:pointer;text-align:center;min-width:0;transition:background .15s,border-color .15s}.drop-zone:hover,.drop-zone.dragover{background:#e8f0eb;border-color:var(--green)}.drop-zone:focus-within{outline:3px solid #619891;outline-offset:3px}.drop-zone strong{font-size:16px}.drop-zone .file-name{font-size:13px;color:var(--muted);overflow-wrap:anywhere;max-width:100%}.drop-zone .file-type{font-size:11px;color:var(--muted)}.file-input{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.upload-row{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-top:18px}.upload-title{display:flex;flex:1;min-width:180px;flex-direction:column;gap:7px;font-size:13px;color:var(--muted)}.upload-title input{font:inherit;width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--paper);color:var(--ink)}.upload-title input:focus-visible{outline:3px solid #619891;outline-offset:3px}.upload-submit{background:var(--green);border-color:var(--green);color:white;padding:10px 16px}.upload-submit:hover{background:#1d4f49}.upload fieldset:disabled .drop-zone{opacity:.55;cursor:default}.upload-progress{width:100%;height:8px;accent-color:var(--green);margin-top:20px}.upload-status{font-size:13px;line-height:1.7;color:var(--muted);margin:12px 0 0;overflow-wrap:anywhere}.upload-status.error,.upload-error{color:#943f31}.upload-error{font-size:13px;line-height:1.7}.upload-result{display:inline-block;margin-top:10px;color:var(--green)}.upload-log{margin-top:12px;padding-top:12px}.upload-log pre{max-height:240px;overflow:auto;font-size:11px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.upload [hidden]{display:none}
+@media(max-width:600px){.upload{padding:18px}.drop-grid{grid-template-columns:1fr}.drop-zone{padding:18px 12px}.upload-title{flex-basis:100%}.upload-row button{flex:1}}
 </style>
 </head>
 <body>
@@ -16,6 +18,24 @@ kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1
 <h1>我的英文聽力練習</h1>
 <p class="intro">每天一集。點選內容開始離線練習。</p>
 <p class="help library-keys"><span><kbd>↑</kbd> <kbd>↓</kbd> 選集 · <kbd>Enter</kbd> 開啟</span><button id="shortcuts" title="顯示快捷鍵清單（?）" aria-keyshortcuts="?" aria-haspopup="dialog" aria-controls="shortcut-dialog">快捷鍵 <kbd>?</kbd></button></p>
+<section class="upload" aria-labelledby="upload-heading">
+ <h2 id="upload-heading">新增一集練習</h2>
+ <p id="upload-note" class="help">拖入 MP3 與同一集的英文原稿，或點選檔案框。兩個檔案也可以一起拖入。</p>
+ <form id="upload-form">
+  <fieldset id="upload-fields" disabled>
+   <div class="drop-grid">
+    <label class="drop-zone" id="audio-drop"><input id="upload-audio" class="file-input" type="file" accept=".mp3,audio/mpeg" aria-label="選擇 MP3 音檔"><strong>MP3 音檔</strong><span class="file-name" id="audio-name">拖放到這裡，或點選檔案</span><span class="file-type">.mp3 · 最多 512 MB</span></label>
+    <label class="drop-zone" id="transcript-drop"><input id="upload-transcript" class="file-input" type="file" accept=".txt,.md,.srt,.vtt" aria-label="選擇英文原稿"><strong>英文原稿</strong><span class="file-name" id="transcript-name">拖放到這裡，或點選檔案</span><span class="file-type">UTF-8 · .txt / .md / .srt / .vtt · 最多 5 MB</span></label>
+   </div>
+   <div class="upload-row"><label class="upload-title">集數名稱<input id="upload-title" type="text" maxlength="200" placeholder="預設使用 MP3 檔名"></label><button type="button" id="upload-clear">清除選取</button><button type="submit" class="upload-submit" id="upload-submit" disabled>新增練習</button></div>
+  </fieldset>
+ </form>
+ <p id="upload-error" class="upload-error" role="alert" hidden></p>
+ <progress id="upload-progress" class="upload-progress" max="100" value="0" aria-label="上傳與建置進度" hidden></progress>
+ <p id="upload-status" class="upload-status" role="status" aria-live="polite"></p>
+ <a id="upload-player" class="upload-result" hidden>開啟這集練習 →</a>
+ <details id="upload-log" class="upload-log" hidden><summary>建置紀錄</summary><pre id="upload-log-text"></pre></details>
+</section>
 <div id="notice" class="notice" role="status" hidden><span id="message"></span><button id="undo" hidden>復原剛刪除的一集</button></div>
 <main id="episodes">__EPISODE_ITEMS__</main>
 <details id="trash-panel"><summary>回收區（<span id="trash-count">__TRASH_COUNT__</span>）</summary><p class="help">刪除的練習可以復原，或永久刪除以釋放該集輸出的空間。</p><div id="trash">__TRASH_ITEMS__</div></details>
@@ -27,9 +47,17 @@ kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1
 const config=JSON.parse(document.getElementById('library-config').textContent);
 const $=id=>document.getElementById(id);
 let lastDeleted=null,pendingPurge=null;
+const allowedOrigin=config.upload?.origins?.includes(location.origin);
 const enabled=Boolean(config.token)&&location.protocol==='http:';
 document.querySelectorAll('[data-action]').forEach(b=>b.disabled=!enabled);
 $('offline').hidden=enabled;
+async function refreshLibrary(){
+ const page=await fetch('/',{cache:'no-store'});
+ if(!page.ok)throw new Error('操作已完成，請重新整理練習庫。');
+ const next=new DOMParser().parseFromString(await page.text(),'text/html');
+ for(const id of ['episodes','trash','trash-count'])$(id).replaceChildren(...next.getElementById(id).childNodes);
+ document.querySelectorAll('[data-action]').forEach(b=>b.disabled=!enabled);
+}
 function notice(text,error=false){$('message').textContent=text;$('notice').hidden=false;$('notice').classList.toggle('error',error);$('undo').hidden=!lastDeleted||error;}
 async function action(button,confirmed=false){
  const kind=button.dataset.action;
@@ -41,10 +69,7 @@ async function action(button,confirmed=false){
   const result=await response.json();
   if(!response.ok)throw new Error(result.error||'操作失敗，請重試。');
   if(kind==='delete')lastDeleted=result.id;else if(lastDeleted===result.id)lastDeleted=null;
-  const page=await fetch('/',{cache:'no-store'});
-  if(!page.ok)throw new Error('操作已完成，請重新整理練習庫。');
-  const next=new DOMParser().parseFromString(await page.text(),'text/html');
-  for(const id of ['episodes','trash','trash-count'])$(id).replaceChildren(...next.getElementById(id).childNodes);
+  await refreshLibrary();
   notice(kind==='delete'?`已將「${result.title}」移到回收區。`:kind==='purge'?`已永久刪除「${result.title}」，無法復原。`:`已復原「${result.title}」。`);
  }catch(error){notice(error.message,true);}finally{if(button.isConnected)button.disabled=false;}
 }
@@ -67,6 +92,92 @@ document.addEventListener('keydown',event=>{
  const next=event.key==='Home'?0:event.key==='End'?links.length-1:index<0?(event.key==='ArrowUp'?links.length-1:0):Math.max(0,Math.min(links.length-1,index+(event.key==='ArrowUp'?-1:1)));
  event.preventDefault();links[next].focus();
 });
+const uploadEnabled=Boolean(config.token)&&Boolean(config.upload)&&allowedOrigin;
+$('upload-fields').disabled=!uploadEnabled;
+if(uploadEnabled)initUpload();
+else $('upload-note').textContent=config.upload&&!allowedOrigin?'此網址尚未啟用上傳，請使用本機練習庫，或請管理者啟用此網站的上傳功能。':enabled?'請重新啟動練習庫服務，即可從這裡新增 MP3 與原稿。':'請透過練習庫服務開啟此頁，即可上傳 MP3 與原稿新增練習。';
+
+function initUpload(){
+ let audioFile=null,transcriptFile=null,busy=false,titleEdited=false,pollTimer=null;
+ const local=['127.0.0.1','localhost'].includes(location.hostname);
+ const audioLimit=local?config.upload.max_audio_bytes:config.upload.max_public_audio_bytes;
+ const audioLimitMB=audioLimit/1024/1024;
+ $('audio-drop').querySelector('.file-type').textContent=`.mp3 · 最多 ${audioLimitMB} MB`;
+ function message(text,error=false){$('upload-status').textContent=text;$('upload-status').classList.toggle('error',error);}
+ function error(text){$('upload-error').textContent=text;$('upload-error').hidden=!text;}
+ function updateFiles(){
+  $('audio-name').textContent=audioFile?`${audioFile.name} · ${(audioFile.size/1024/1024).toFixed(1)} MB`:'拖放到這裡，或點選檔案';
+  $('transcript-name').textContent=transcriptFile?transcriptFile.name:'拖放到這裡，或點選檔案';
+  $('upload-submit').disabled=busy||!audioFile||!transcriptFile;
+ }
+ function setBusy(value){busy=value;$('upload-fields').disabled=value;updateFiles();}
+ function chooseFiles(files){
+  if(busy)return;
+  let nextAudio=null,nextTranscript=null;
+  for(const file of Array.from(files)){
+   const extension=file.name.split('.').pop().toLowerCase();
+   const kind=extension==='mp3'?'audio':['txt','md','srt','vtt'].includes(extension)?'transcript':null;
+   if(!kind){error('請選擇 MP3 與 .txt、.md、.srt 或 .vtt 英文原稿。');return;}
+   const limit=kind==='audio'?audioLimit:config.upload.max_transcript_bytes;
+   if(file.size===0||file.size>limit){error(`檔案不能是空的；MP3 上限為 ${audioLimitMB} MB，原稿上限為 5 MB。`);return;}
+   if((kind==='audio'&&nextAudio)||(kind==='transcript'&&nextTranscript)){error('每次請選擇一個 MP3 與一個原稿檔案。');return;}
+   if(kind==='audio')nextAudio=file;else nextTranscript=file;
+  }
+  if(nextAudio){audioFile=nextAudio;if(!titleEdited)$('upload-title').value=audioFile.name.replace(/\.[^.]+$/,'').slice(0,200);}
+  if(nextTranscript)transcriptFile=nextTranscript;
+  error('');updateFiles();
+ }
+ function clearFiles(){audioFile=null;transcriptFile=null;titleEdited=false;$('upload-audio').value='';$('upload-transcript').value='';$('upload-title').value='';error('');updateFiles();}
+ for(const id of ['upload-audio','upload-transcript'])$(id).addEventListener('change',event=>{chooseFiles(event.target.files);event.target.value='';});
+ $('upload-title').addEventListener('input',()=>{titleEdited=true;});
+ $('upload-clear').addEventListener('click',clearFiles);
+ for(const id of ['audio-drop','transcript-drop']){
+  const zone=$(id);let depth=0;
+  zone.addEventListener('dragenter',event=>{event.preventDefault();if(!busy){depth++;zone.classList.add('dragover');}});
+  zone.addEventListener('dragover',event=>{event.preventDefault();event.dataTransfer.dropEffect=busy?'none':'copy';});
+  zone.addEventListener('dragleave',()=>{depth=Math.max(0,depth-1);if(!depth)zone.classList.remove('dragover');});
+  zone.addEventListener('drop',event=>{event.preventDefault();event.stopPropagation();depth=0;zone.classList.remove('dragover');chooseFiles(event.dataTransfer.files);});
+ }
+ // Dropping outside the file boxes should not navigate away from an in-progress build.
+ document.addEventListener('dragover',event=>{if(Array.from(event.dataTransfer.types).includes('Files'))event.preventDefault();});
+ document.addEventListener('drop',event=>{if(Array.from(event.dataTransfer.types).includes('Files'))event.preventDefault();});
+ async function poll(identifier){
+  if(pollTimer!==null)clearTimeout(pollTimer);
+  try{
+   const response=await fetch(`/api/uploads/${identifier}`,{headers:{'X-Practice-Token':config.token},cache:'no-store'});
+   const job=await response.json();if(!response.ok)throw new Error(job.error||'無法讀取建置進度。');
+   $('upload-log').hidden=!job.log;$('upload-log-text').textContent=job.log||'';
+   if(job.state==='completed'){
+    setBusy(false);clearFiles();$('upload-progress').value=100;message(job.message);
+    $('upload-player').href=job.player;$('upload-player').hidden=false;
+    try{await refreshLibrary();}catch{message(`${job.message} 請重新整理練習庫以查看新內容。`);}
+   }else if(job.state==='failed'){
+    setBusy(false);$('upload-progress').hidden=true;message(job.message,true);$('upload-submit').textContent='重試新增';
+   }else{
+    setBusy(true);$('upload-progress').hidden=false;$('upload-progress').removeAttribute('value');
+    message(`「${job.title}」· ${job.stage}。可以繼續瀏覽；重新整理後仍可查看進度。`);
+    pollTimer=setTimeout(()=>poll(identifier),2000);
+   }
+  }catch(cause){message(`${cause.message} 請重新整理以重新連線；已開始的建置會繼續執行。`,true);}
+ }
+ $('upload-form').addEventListener('submit',event=>{
+  event.preventDefault();if(busy)return;
+  if(!audioFile||!transcriptFile){error('請先選擇 MP3 音檔與英文原稿。');return;}
+  error('');setBusy(true);$('upload-submit').textContent='新增練習';$('upload-player').hidden=true;$('upload-log').hidden=true;
+  $('upload-progress').hidden=false;$('upload-progress').value=0;message('正在上傳到練習庫…');
+  const metadata={title:$('upload-title').value,audio_name:audioFile.name,audio_size:audioFile.size,transcript_name:transcriptFile.name,transcript_size:transcriptFile.size};
+  const request=new XMLHttpRequest();request.open('POST','/api/upload');request.responseType='json';
+  request.setRequestHeader('Content-Type','application/octet-stream');request.setRequestHeader('X-Practice-Token',config.token);request.setRequestHeader('X-Practice-Upload',encodeURIComponent(JSON.stringify(metadata)));
+  request.upload.addEventListener('progress',progress=>{if(progress.lengthComputable){const percent=Math.round(progress.loaded/progress.total*100);$('upload-progress').value=percent;message(percent<100?`正在上傳到練習庫 · ${percent}%`:'上傳完成，正在檢查檔案…');}});
+  request.addEventListener('load',()=>{
+   if(request.status===202&&request.response?.id){$('upload-progress').removeAttribute('value');poll(request.response.id);}
+   else{setBusy(false);$('upload-progress').hidden=true;message(request.response?.error||(request.status===413?'檔案超過網站的上傳限制，請改用本機練習庫。':request.status===401||request.status===403?'登入或頁面已過期，請重新整理並登入後重試。':'上傳失敗，請重試。'),true);}
+  });
+  request.addEventListener('error',()=>{setBusy(false);$('upload-progress').hidden=true;message('上傳連線中斷。請重新整理，確認是否已開始建置後再重試。',true);});
+  request.send(new Blob([audioFile,transcriptFile],{type:'application/octet-stream'}));
+ });
+ if(config.upload.job){setBusy(true);poll(config.upload.job);}
+}
 </script>
 </body>
 </html>

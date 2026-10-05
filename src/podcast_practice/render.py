@@ -125,7 +125,7 @@ def render_player(data: dict, audio: Path, output: Path) -> None:
     temporary.replace(output)
 
 
-def library_html(root: Path, token: str | None = None) -> str:
+def library_html(root: Path, token: str | None = None, upload: dict | None = None) -> str:
     root.mkdir(parents=True, exist_ok=True)
     episodes = []
     for path in root.glob("*/alignment.json"):
@@ -161,7 +161,7 @@ def library_html(root: Path, token: str | None = None) -> str:
         for row in recycled
     )
     template = files("podcast_practice").joinpath("assets/library.html").read_text(encoding="utf-8")
-    config = json.dumps({"token": token}).replace("</", "<\\/")
+    config = json.dumps({"token": token, "upload": upload}).replace("</", "<\\/")
     return (
         template.replace("__EPISODE_ITEMS__", listing)
         .replace("__TRASH_ITEMS__", trash_items or '<p class="empty">回收區是空的。</p>')

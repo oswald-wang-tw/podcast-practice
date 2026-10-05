@@ -51,10 +51,15 @@ def parser() -> argparse.ArgumentParser:
         "--allow-low-confidence", action="store_true", help="允許低吻合率繼續，需人工核對"
     )
     create.add_argument("--open", action="store_true", help="完成後用預設瀏覽器開啟")
+    create.add_argument("--result-json", type=Path, help=argparse.SUPPRESS)
     serve = sub.add_parser("serve", help="開啟本機練習庫，瀏覽每天的內容")
     serve.add_argument("--library", type=Path, default=Path("library"))
     serve.add_argument("--port", type=int, default=8766)
     serve.add_argument("--open", action="store_true")
+    serve.add_argument(
+        "--public-origin",
+        help="允許既有反向代理網址上傳，例如 https://podcast.example.com",
+    )
     sub.add_parser("doctor", help="檢查本地環境與模型")
     render = sub.add_parser("render", help="使用既有 alignment.json 重建播放器，不重新對齊")
     render.add_argument("episode", type=Path, help="含 alignment.json 和 audio.mp3 的單集目錄")
@@ -78,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "serve":
             root = args.library.expanduser().resolve()
-            with library_server(root, args.port) as server:
+            with library_server(
+                root, args.port, runtime_dir=args.runtime_dir, public_origin=args.public_origin
+            ) as server:
                 url = f"http://127.0.0.1:{server.server_port}/"
                 print(f"練習庫：{url}\n按 Ctrl+C 結束。", flush=True)
                 if args.open:
@@ -146,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
                             allow_low_confidence=args.allow_low_confidence,
                         ),
                     )
+                    if args.result_json:
+                        temporary = args.result_json.with_suffix(".tmp")
+                        temporary.write_text(
+                            json.dumps({"directory": str(destination)}), encoding="utf-8"
+                        )
+                        temporary.replace(args.result_json)
                     if args.open:
                         webbrowser.open((destination / "player.html").as_uri())
         return 0

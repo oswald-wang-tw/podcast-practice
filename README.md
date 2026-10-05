@@ -88,6 +88,51 @@ players remain usable offline after the server stops. Commands use `library/` in
 the current working directory by default; run them from the repository directory
 to use the same library.
 
+## Add episodes from the browser
+
+Run `uv run podcast-practice serve --open` and use the **Add an episode** area at
+the top of the library. Drag an MP3 and its English transcript onto either file
+box, or click the boxes to choose files. You can drop both files together or add
+them one at a time. Enter an episode title, or use the audio filename as the title,
+then click the add button.
+
+- MP3 files: up to 512 MiB locally, or 90 MiB through an enabled public origin.
+- UTF-8 transcripts: `.txt`, `.md`, `.srt`, or `.vtt`, up to 5 MiB.
+- Files are stored on the computer running the server. Website uploads pass
+  through the existing reverse proxy. Copies and build logs are retained under
+  `library/.uploads/`; this directory is not served over HTTP.
+- The existing offline MFA pipeline builds the player in the library served by the
+  current command, using the runtime selected with `--runtime-dir`. Run `setup`
+  before uploading; the browser does not install tools or download models.
+- The page shows upload progress, then the current build stage and an expandable
+  build log. Builds run in the background, one at a time. Reloading the page
+  reconnects to the latest job.
+- On success, the episode list updates and a link opens the finished player. On
+  failure, correct the inputs or runtime issue and retry. Stopping the server also
+  stops its active build; the inputs and logs remain available for diagnosis.
+
+Browser uploads require the local server. Opening `index.html` through `file://`
+disables uploading. Restart a server started before this feature was added to
+enable its new upload endpoints.
+
+If you already serve the library through a trusted reverse proxy, explicitly allow
+that site's origin when starting the local server:
+
+```sh
+uv run podcast-practice serve --public-origin https://podcast.oswaldwang.com
+```
+
+The server still binds to loopback. Uploads require the page's request token and
+an allowed origin; other origins are rejected. The public origin enables uploads;
+trash management retains its local origin restrictions. Keep the authentication
+and access restrictions of your existing reverse proxy in place. This deployment
+uses its existing Cloudflare Access login.
+
+Local uploads accept MP3 files up to 512 MiB. The public website accepts MP3 files
+up to 90 MiB, with a 5 MiB transcript limit, so each request stays below the
+reverse proxy's usual 100 MB request limit. Larger MP3 files can be added locally
+and will appear in the same library on the website.
+
 ## Keyboard shortcuts
 
 The player and library both have a shortcut-help button. Press `?` to open the
