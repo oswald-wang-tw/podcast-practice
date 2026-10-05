@@ -79,7 +79,9 @@ def transcribe(
     return result
 
 
-def match_anchors(transcript: Transcript, recognized: list[dict]) -> tuple[dict[int, dict], float]:
+def match_anchors(
+    transcript: Transcript, recognized: list[dict], *, min_block: int = 3
+) -> tuple[dict[int, dict], float]:
     tokens, rows = [], []
     for row in recognized:
         for token in spoken_tokens(row["text"]):
@@ -88,7 +90,7 @@ def match_anchors(transcript: Transcript, recognized: list[dict]) -> tuple[dict[
     matcher = difflib.SequenceMatcher(a=transcript.normalized, b=tokens, autojunk=False)
     anchors = {}
     for block in matcher.get_matching_blocks():
-        if block.size < min(3, len(transcript.normalized)):
+        if block.size < min(min_block, len(transcript.normalized)):
             continue
         for offset in range(block.size):
             row = rows[block.b + offset]
@@ -97,12 +99,96 @@ def match_anchors(transcript: Transcript, recognized: list[dict]) -> tuple[dict[
     return anchors, len(anchors) / len(transcript.normalized)
 
 
+def gap_segments(
+    transcript: Transcript, recognized: list[dict], duration: float
+) -> tuple[list[dict], list[dict]]:
+    """Seed MFA with bounded text blocks when reliable anchors expose omitted audio.
+
+    Only cut at sentence boundaries with three consecutive matched tokens on
+    each side. ASR locates the blocks; it never supplies the displayed text or
+    final word timestamps. Empty TextGrid intervals retain the original audio.
+    """
+    # Short transition phrases can be separated from the larger matching blocks
+    # by an advert (e.g. "Great point." / advert / "Okay, David, ..."). Include
+    # them here, but still require three consecutive matched tokens on each side
+    # of every cut. The ordinary window corrections retain their stricter blocks.
+    anchors, _ = match_anchors(transcript, recognized, min_block=1)
+    size = len(transcript.normalized)
+    cuts = []
+    gaps = []
+    begin = 0.0
+    end = duration
+    if all(k in anchors for k in range(min(3, size))):
+        candidate = max(0.0, anchors[0]["start"] - 0.5)
+        if candidate >= 8:
+            begin = candidate
+            gaps.append({"begin": 0.0, "end": begin})
+    for sentence in transcript.sentences[:-1]:
+        token = sentence.words[-1].norm_end
+        exact = all(k in anchors for k in range(token - 3, token + 3))
+        if exact:
+            left, right = anchors[token - 1]["end"], anchors[token]["start"]
+        else:
+            # Proper names at the resumption are often misrecognized. Allow up
+            # to five unmatched edge tokens only for a long gap, with matched
+            # three-word context beyond them and conservative speech padding.
+            left_tokens = [
+                k
+                for k in range(max(0, token - 6), token)
+                if all(j in anchors for j in range(k - 2, k + 1))
+            ]
+            right_tokens = [
+                k
+                for k in range(token, min(size, token + 6))
+                if all(j in anchors for j in range(k, k + 3))
+            ]
+            if not left_tokens or not right_tokens:
+                continue
+            lkey, rkey = left_tokens[-1], right_tokens[0]
+            left = anchors[lkey]["end"] + (token - lkey - 1) * 0.6
+            right = anchors[rkey]["start"] - (rkey - token) * 0.6
+            if right - left < 8:
+                continue
+        if right < left:
+            continue
+        if right - left >= 8:
+            left, right = left + 0.5, right - 0.5
+            gaps.append({"begin": round(left, 4), "end": round(right, 4)})
+        else:
+            left = right = (left + right) / 2
+        cuts.append((token, left, right))
+    if all(k in anchors for k in range(max(0, size - 3), size)):
+        candidate = min(duration, anchors[size - 1]["end"] + 0.5)
+        if duration - candidate >= 8:
+            end = candidate
+            gaps.append({"begin": end, "end": duration})
+    if not gaps:
+        return [], []
+    segments = []
+    previous_token = 0
+    for token, left, right in [*cuts, (size, end, end)]:
+        if not (previous_token < token <= size and 0 <= begin < left <= duration):
+            raise PracticeError("缺稿區間的粗定位範圍衝突；停止對齊，請檢查原稿。")
+        segments.append(
+            {
+                "begin": round(begin, 4),
+                "end": round(left, 4),
+                "token_start": previous_token,
+                "token_end": token,
+            }
+        )
+        previous_token, begin = token, right
+    return segments, gaps
+
+
 def search_windows(
     transcript: Transcript,
     initial: list[dict],
     duration: float,
     recognized: list[dict] | None = None,
     overrides: list[dict] | None = None,
+    *,
+    gaps: list[dict] | None = None,
 ) -> tuple[list[dict], float | None]:
     anchors, coverage = (
         match_anchors(transcript, recognized) if recognized is not None else ({}, None)
@@ -116,6 +202,15 @@ def search_windows(
             else max(0, baseline["start"] - 0.4)
         )
         end = (baseline["end"] + initial[i + 1]["start"]) / 2 if i + 1 < len(initial) else duration
+        # A midpoint across omitted speech assigns half an advert to each
+        # neighboring sentence even when MFA and ASR already agree. Keep long
+        # gaps blank instead of stretching correctly aligned sentences into them.
+        if i and baseline["start"] - initial[i - 1]["end"] > 3:
+            begin = max(begin, baseline["start"] - 0.5)
+        if i + 1 < len(initial) and initial[i + 1]["start"] - baseline["end"] > 3:
+            end = min(end, baseline["end"] + 0.5)
+        if i + 1 == len(initial) and duration - baseline["end"] > 3:
+            end = min(end, baseline["end"] + 0.5)
         baseline_windows.append(
             {"id": i, "begin": round(begin, 4), "end": round(end, 4), "adjusted": False}
         )
@@ -182,6 +277,16 @@ def search_windows(
             break
         for i in fallback:
             proposed[i] = {**baseline_windows[i], "anchor_fallback": True}
+    # MFA can shift a boundary slightly relative to ASR. Its normal half-second
+    # padding must not bring a known omitted interval back into the final pass.
+    for baseline, window in zip(initial, windows, strict=True):
+        for gap in gaps or []:
+            if baseline["end"] <= gap["begin"]:
+                window["end"] = min(window["end"], gap["begin"])
+            elif baseline["start"] >= gap["end"]:
+                window["begin"] = max(window["begin"], gap["end"])
+            else:
+                raise PracticeError("第一輪 MFA 的句子跨過缺稿區間；停止對齊，請檢查原稿。")
     # Explicit ranges are authoritative: reject overlap rather than silently changing them.
     if overrides:
         for row in overrides:
@@ -205,4 +310,6 @@ def search_windows(
                 "請檢查原稿或使用 --windows 提供正確範圍。"
             )
         previous = window["end"]
+        if any(window["begin"] < g["end"] and window["end"] > g["begin"] for g in gaps or []):
+            raise PracticeError("提供的字幕搜尋範圍跨過缺稿區間；請修正 --windows 後重試。")
     return windows, coverage

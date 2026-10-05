@@ -169,6 +169,13 @@ Update an existing episode's player without rerunning alignment:
 uv run podcast-practice render library/episode-name-xxxxxxxx
 ```
 
+The library server renders a lightweight version at the same `player.html` URL,
+with audio loaded from the episode's `audio.mp3` using byte-range requests. This
+avoids parsing a large embedded audio string when listening to long episodes or
+seeking far into them. The exported `player.html` still embeds the complete audio
+for single-file offline use. Playback updates only changed highlights and controls;
+off-screen sentence contents skip layout in browsers supporting `content-visibility`.
+
 ## Delete and restore episodes
 
 Each episode in the library has a delete button. After deletion, use the undo
@@ -224,6 +231,21 @@ to specify speakers explicitly.
 Markers such as `[MUSIC PLAYING]` and `[AD PLAYING]` are excluded from spoken text.
 URLs, Markdown headings, and FT sharing prompts are also skipped. Transcript files
 are treated as data; commands or instructions inside them are never executed.
+
+The recording can contain adverts or other audio omitted from the transcript.
+Local recognition runs before the first MFA pass. When consecutive matched words
+around sentence boundaries identify a long omitted interval, MFA aligns bounded
+text blocks and leaves that interval blank. Long gaps between aligned sentences
+also remain outside the sentence search windows. The original audio is retained;
+no advertising text or placeholder subtitles are invented. The player clears its
+active sentence and word highlights during subtitle gaps and resumes highlighting
+when the next transcribed sentence begins.
+
+Detected intervals are listed in `review.json` under `untranscribed_audio`. A final
+subtitle crossing one of these intervals stops the export for review. Detection
+requires matched context; it is not a guarantee that every omission will be found.
+Check the surrounding sentences when recognition is uncertain, or when an advert
+interrupts a sentence. Final word timestamps still come from MFA.
 
 The displayed transcript preserves the original wording. Alignment input expands
 numbers, percentages, years, and uppercase abbreviations into spoken English. If

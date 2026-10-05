@@ -110,16 +110,22 @@ def export_episode(data: dict, audio: Path, destination: Path) -> None:
     render_player(data, playback, destination / "player.html")
 
 
-def render_player(data: dict, audio: Path, output: Path) -> None:
+def player_html(data: dict, audio_source: str) -> str:
+    """Render the same controls for a portable file or an HTTP audio resource."""
     template = files("podcast_practice").joinpath("assets/player.html").read_text(encoding="utf-8")
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    encoded = base64.b64encode(audio.read_bytes()).decode("ascii")
-    result = (
+    source = json.dumps(audio_source).replace("</", "<\\/")
+    return (
         template.replace("__TITLE__", html.escape(data["title"]))
         .replace("__EPISODE_META__", html.escape(data.get("created", "")))
         .replace("__ALIGNMENT_JSON__", payload)
-        .replace("__AUDIO_DATA_URI__", "data:audio/mpeg;base64," + encoded)
+        .replace("'__AUDIO_DATA_URI__'", source)
     )
+
+
+def render_player(data: dict, audio: Path, output: Path) -> None:
+    encoded = base64.b64encode(audio.read_bytes()).decode("ascii")
+    result = player_html(data, "data:audio/mpeg;base64," + encoded)
     temporary = output.with_suffix(".html.tmp")
     temporary.write_text(result, encoding="utf-8")
     temporary.replace(output)

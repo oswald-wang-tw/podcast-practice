@@ -16,7 +16,7 @@ from praatio import textgrid
 
 from . import __version__
 from .alignment import quality_report, restore
-from .anchors import search_windows, transcribe
+from .anchors import gap_segments, search_windows, transcribe
 from .errors import PracticeError
 from .render import export_episode, update_library
 from .runtime import MODELS, Runtime
@@ -116,6 +116,7 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
     model = options.asr_model or runtime.config.get("asr_model", "base.en")
     settings = {
         "version": __version__,
+        "alignment_revision": 2,
         "title": title,
         "speakers": options.speakers,
         "asr_model": model,
@@ -170,21 +171,51 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
     print(f"音檔長度：{duration / 60:.1f} 分鐘。", flush=True)
     dictionary = runtime.lexicon(transcript.normalized, job)
     supplied_times = all(sentence.supplied_start is not None for sentence in transcript.sentences)
+    recognized = None
+    gaps = []
+    if not options.no_asr and not supplied_times:
+        # Locate omitted audio before asking MFA to align the transcript. A
+        # whole-episode forced pass can fail before later ASR corrections run.
+        recognized = transcribe(runtime, wav, job, model, offline=options.offline)
     if supplied_times:
         initial = [{"start": s.supplied_start, "end": s.supplied_end} for s in transcript.sentences]
     else:
-        print("MFA 第一輪：原稿與整集對齊…", flush=True)
+        coarse, gaps = (
+            gap_segments(transcript, recognized, duration) if recognized is not None else ([], [])
+        )
+        initial_text = normalized
+        if coarse:
+            print(f"找到 {len(gaps)} 個缺稿區間；MFA 第一輪保留這些區間空白…", flush=True)
+            initial_text = job / "coarse.TextGrid"
+            grid = textgrid.Textgrid()
+            grid.addTier(
+                textgrid.IntervalTier(
+                    "speech",
+                    [
+                        (
+                            s["begin"],
+                            s["end"],
+                            " ".join(transcript.normalized[s["token_start"] : s["token_end"]]),
+                        )
+                        for s in coarse
+                    ],
+                    0,
+                    duration,
+                )
+            )
+            grid.save(str(initial_text), format="long_textgrid", includeBlankSpaces=True)
+        else:
+            print("MFA 第一輪：原稿與整集對齊…", flush=True)
         raw_initial = mfa_align(
-            runtime, wav, normalized, dictionary, job / "initial-mfa.json", job, clean=True
+            runtime, wav, initial_text, dictionary, job / "initial-mfa.json", job, clean=True
         )
         initial = restore(transcript, raw_initial)
-    recognized = None
-    if not options.no_asr and not supplied_times:
-        recognized = transcribe(runtime, wav, job, model, offline=options.offline)
     overrides = json.loads(options.windows.read_text(encoding="utf-8")) if options.windows else None
     if overrides is not None and not isinstance(overrides, list):
         raise PracticeError("--windows 的 JSON 最外層必須是陣列。")
-    windows, coverage = search_windows(transcript, initial, duration, recognized, overrides)
+    windows, coverage = search_windows(
+        transcript, initial, duration, recognized, overrides, gaps=gaps
+    )
     (job / "windows.json").write_text(json.dumps(windows, ensure_ascii=False, indent=2))
     if coverage is not None:
         print(f"原稿與本地辨識的粗定位吻合率：{coverage:.0%}", flush=True)
@@ -200,7 +231,13 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
         runtime, wav, segments_path, dictionary, job / "refined-mfa.json", job, clean=supplied_times
     )
     sentences = restore(transcript, raw_final)
+    for sentence in sentences:
+        if any(sentence["start"] < gap["end"] and sentence["end"] > gap["begin"] for gap in gaps):
+            raise PracticeError(
+                f"第 {sentence['id'] + 1} 句的字幕跨過缺稿區間；停止匯出，請檢查原稿或搜尋範圍。"
+            )
     report = quality_report(raw_final, sentences, windows, coverage)
+    report["untranscribed_audio"] = gaps
     if supplied_times:
         report["warnings"] = [w for w in report["warnings"] if w["type"] != "no_asr_check"]
     mp3 = job / "audio.mp3"

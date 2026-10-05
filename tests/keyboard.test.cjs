@@ -6,24 +6,26 @@ const {test} = require('node:test');
 const vm = require('node:vm');
 
 class Classes {
-  constructor() { this.values = new Set(); }
-  add(value) { this.values.add(value); }
-  remove(value) { this.values.delete(value); }
+  constructor(stats) { this.values = new Set(); this.stats = stats; }
+  add(value) { this.stats.classOps++; this.values.add(value); }
+  remove(value) { this.stats.classOps++; this.values.delete(value); }
   contains(value) { return this.values.has(value); }
   toggle(value, force = !this.contains(value)) {
+    this.stats.classOps++;
     if (force) this.add(value); else this.remove(value);
     return force;
   }
 }
 
-function fixture(page = 'player') {
+function fixture(page = 'player', suppliedData) {
   const html = readFileSync(join(__dirname, '../src/podcast_practice/assets', `${page}.html`), 'utf8');
-  const listeners = new Map(), elements = new Map(), timers = new Map();
-  let timerId = 0, plays = 0;
+  const listeners = new Map(), elements = new Map(), timers = new Map(), frames = new Map();
+  const stats = {classOps: 0, textWrites: 0, attributeWrites: 0, geometryReads: 0, scrolls: 0};
+  let timerId = 0, frameId = 0, plays = 0;
   class Element {
     constructor(tagName = 'div') {
       this.tagName = tagName.toUpperCase();
-      this.classList = new Classes();
+      this.classList = new Classes(stats);
       this.style = {}; this.dataset = {}; this.attributes = {}; this.children = [];
       this.events = new Map(); this.checked = false; this.disabled = false;
       this.hidden = false; this.open = false; this.isContentEditable = false;
@@ -31,7 +33,7 @@ function fixture(page = 'player') {
     }
     set className(value) { this.classList.values = new Set(value.split(' ')); }
     get className() { return [...this.classList.values].join(' '); }
-    set textContent(value) { this._text = String(value); this.children = []; }
+    set textContent(value) { stats.textWrites++; this._text = String(value); this.children = []; }
     get textContent() { return this._text + this.children.map(c => c.textContent ?? c).join(''); }
     set value(value) {
       if (this.options) this.selectedIndex = this.options.findIndex(o => o.value === String(value));
@@ -39,7 +41,7 @@ function fixture(page = 'player') {
     }
     get value() { return this.options ? this.options[this.selectedIndex]?.value : this._value; }
     append(...children) { for (const child of children) { if (typeof child !== 'string') child.parent = this; this.children.push(child); } }
-    setAttribute(key, value) { this.attributes[key] = value; }
+    setAttribute(key, value) { stats.attributeWrites++; this.attributes[key] = value; }
     addEventListener(key, fn) { const list = this.events.get(key) || []; list.push(fn); this.events.set(key, list); }
     dispatchEvent(event) { event.target ??= this; for (const fn of this.events.get(event.type) || []) fn(event); }
     click() {
@@ -64,8 +66,8 @@ function fixture(page = 'player') {
     select() { this.selection = [0, this.value.length]; }
     showModal() { this.open = true; }
     close() { this.open = false; }
-    scrollIntoView() {}
-    getBoundingClientRect() { return {top: 300, bottom: 400}; }
+    scrollIntoView() { stats.scrolls++; }
+    getBoundingClientRect() { stats.geometryReads++; return this.rect || {top: 300, bottom: 400}; }
   }
   for (const match of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)) {
     const el = new Element(match[1]); el.id = match[2];
@@ -82,7 +84,7 @@ function fixture(page = 'player') {
     querySelectorAll: selector => selector === '#episodes a' ? elements.get('episodes').children : [],
   };
   document.activeElement = document.body;
-  const data = {
+  const data = suppliedData || {
     title: 'Keyboard fixture', duration: 20, review: {warnings: []}, chapters: [{title: 'Start', sentence: 0}],
     sentences: [1, 6, 12].map((start, id) => ({id, start, end: start + 2, speaker: 'Host', text: `Sentence ${id}`, words: [{text: `word${id}`, start, end: start + 1}]})),
   };
@@ -100,7 +102,8 @@ function fixture(page = 'player') {
   const context = {
     document, window: {innerHeight: 1000}, location: {protocol: 'http:'},
     Event: class { constructor(type) { this.type = type; } },
-    requestAnimationFrame: () => {},
+    requestAnimationFrame: fn => { frames.set(++frameId, fn); return frameId; },
+    cancelAnimationFrame: id => frames.delete(id),
     setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
     clearTimeout: id => timers.delete(id),
   };
@@ -111,7 +114,8 @@ function fixture(page = 'player') {
     for (const fn of listeners.get('keydown') || []) fn(event);
     return event;
   }
-  return {key, elements, document, data, timers, get plays() { return plays; }, Element};
+  function runFrame() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); }
+  return {key, elements, document, data, timers, frames, stats, runFrame, get plays() { return plays; }, Element};
 }
 
 test('sentence navigation stops at the ends, replay works, and seeking stays in bounds', () => {
@@ -125,6 +129,79 @@ test('sentence navigation stops at the ends, replay works, and seeking stays in 
   assert.equal(audio.currentTime, 20);
   for (let i = 0; i < 5; i++) f.key('ArrowLeft', {shiftKey: true});
   assert.equal(audio.currentTime, 0);
+});
+
+test('untranscribed audio clears active highlights and resumes on the next sentence', () => {
+  const f = fixture(), audio = f.elements.get('audio');
+  const rows = f.elements.get('transcript').children;
+  const words = rows.map(row => row.children[1].children.at(-1).children[0]);
+  audio.currentTime = 1.5; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(rows[0].classList.contains('active'), true);
+  assert.equal(words[0].classList.contains('spoken'), true);
+  audio.currentTime = 4; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(rows.some(row => row.classList.contains('active')), false);
+  assert.equal(words.some(word => word.classList.contains('spoken')), false);
+  assert.equal(audio.currentTime, 4);
+  audio.currentTime = 6.5; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(rows[1].classList.contains('active'), true);
+  assert.equal(words[1].classList.contains('spoken'), true);
+  audio.currentTime = 17; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(rows.some(row => row.classList.contains('active')), false);
+  assert.equal(words.some(word => word.classList.contains('spoken')), false);
+});
+
+test('long transcript updates touch only changed rows and leave idle frames unchanged', () => {
+  const sentences = Array.from({length: 5000}, (_, id) => ({id, start: id * 6 + 1, end: id * 6 + 3,
+    speaker: 'Host', text: `Sentence ${id}`, words: [{text: `word${id}`, start: id * 6 + 1, end: id * 6 + 2}]}));
+  const f = fixture('player', {duration: 30000, sentences, chapters: [{title: 'Start', sentence: 0}], review: {warnings: []}});
+  const audio = f.elements.get('audio'), rows = f.elements.get('transcript').children;
+  audio.currentTime = sentences[1400].start + 0.2; audio.dispatchEvent({type: 'timeupdate'});
+  const before = {...f.stats};
+  for (let i = 0; i < 100; i++) {
+    audio.currentTime += 0.0001; audio.dispatchEvent({type: 'timeupdate'});
+  }
+  assert.equal(f.stats.classOps, before.classOps);
+  assert.equal(f.stats.textWrites, before.textWrites);
+  assert.equal(f.stats.attributeWrites, before.attributeWrites);
+  assert.equal(f.stats.geometryReads, before.geometryReads);
+  audio.currentTime = sentences[1401].start + 0.2; audio.dispatchEvent({type: 'timeupdate'});
+  assert.ok(f.stats.classOps - before.classOps <= 8);
+  assert.equal(rows[1400].classList.contains('selected'), false);
+  assert.equal(rows[1401].classList.contains('selected'), true);
+  assert.equal(rows[1401].classList.contains('active'), true);
+});
+
+test('rapid playback restarts keep exactly one animation loop', () => {
+  const f = fixture(), audio = f.elements.get('audio');
+  for (let i = 0; i < 100; i++) {
+    f.key(' '); assert.equal(f.frames.size, 1);
+    f.key(' '); assert.equal(f.frames.size, 0);
+  }
+  f.key(' '); audio.dispatchEvent({type: 'play'});
+  assert.equal(f.frames.size, 1);
+  f.runFrame(); assert.equal(f.frames.size, 1);
+  audio.pause(); assert.equal(f.frames.size, 0);
+});
+
+test('following can resume on the same sentence without waiting for its boundary', () => {
+  const f = fixture(), audio = f.elements.get('audio');
+  const row = f.elements.get('transcript').children[1];
+  row.rect = {top: 2000, bottom: 2100};
+  f.key('f'); audio.currentTime = 6.5; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(f.stats.scrolls, 0);
+  f.elements.get('follow').click(); assert.equal(f.stats.scrolls, 1);
+});
+
+test('seeking back to the same sentence follows again after leaving it', () => {
+  const f = fixture(), audio = f.elements.get('audio'), seek = f.elements.get('seek');
+  const row = f.elements.get('transcript').children[1];
+  row.rect = {top: 2000, bottom: 2100};
+  audio.currentTime = 6.5; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(f.stats.scrolls, 1);
+  audio.currentTime = 4; audio.dispatchEvent({type: 'timeupdate'});
+  seek.value = 6.5; seek.dispatchEvent({type: 'input'});
+  assert.equal(f.stats.scrolls, 2);
+  assert.equal(row.classList.contains('active'), true);
 });
 
 test('speed changes use the existing choices and stop at their limits', () => {

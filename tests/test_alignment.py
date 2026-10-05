@@ -1,9 +1,117 @@
 import pytest
 
 from podcast_practice.alignment import quality_report, restore
-from podcast_practice.anchors import search_windows
+from podcast_practice.anchors import gap_segments, search_windows
 from podcast_practice.errors import PracticeError
 from podcast_practice.transcript import parse_transcript
+
+
+def test_omitted_midrolls_stay_blank_when_mfa_and_asr_already_agree(tmp_path):
+    source = tmp_path / "episode.txt"
+    source.write_text("Welcome to the show. The story begins again. Here is our conclusion.")
+    transcript = parse_transcript(source)
+    initial = [{"start": 0, "end": 2}, {"start": 62, "end": 64}, {"start": 124, "end": 126}]
+    recognized = []
+    for sentence, timing in zip(transcript.sentences, initial, strict=True):
+        for i, token in enumerate(
+            transcript.normalized[sentence.words[0].norm_start : sentence.words[-1].norm_end]
+        ):
+            recognized.append(
+                {
+                    "text": token,
+                    "start": timing["start"] + i * 0.5,
+                    "end": timing["start"] + (i + 1) * 0.5,
+                }
+            )
+        recognized.extend(
+            [
+                {"text": word, "start": timing["end"] + i, "end": timing["end"] + i + 0.4}
+                for i, word in enumerate("sponsored message buy something today".split())
+            ]
+        )
+    windows, coverage = search_windows(transcript, initial, 180, recognized)
+    assert coverage == 1
+    assert windows[0]["end"] == 2.5
+    assert windows[1]["begin"] == 61.5
+    assert windows[1]["end"] == 64.5
+    assert windows[2]["begin"] == 123.5
+    assert windows[2]["end"] == 126.5
+    segments, gaps = gap_segments(transcript, recognized, 180)
+    assert [(s["begin"], s["end"]) for s in segments] == [(0, 2.5), (61.5, 64.5), (123.5, 126.5)]
+    assert gaps == [
+        {"begin": 2.5, "end": 61.5},
+        {"begin": 64.5, "end": 123.5},
+        {"begin": 126.5, "end": 180},
+    ]
+
+
+def test_coarse_gap_segments_require_matched_context_and_preserve_every_token(tmp_path):
+    source = tmp_path / "episode.txt"
+    source.write_text("Welcome to our show. The new story starts here.")
+    transcript = parse_transcript(source)
+    recognized = [
+        {"text": token, "start": 20 + i * 0.4, "end": 20.4 + i * 0.4}
+        for i, token in enumerate(transcript.normalized)
+    ]
+    segments, gaps = gap_segments(transcript, recognized, 24)
+    assert gaps == [{"begin": 0, "end": 19.5}]
+    restored = [
+        token
+        for s in segments
+        for token in transcript.normalized[s["token_start"] : s["token_end"]]
+    ]
+    assert restored == transcript.normalized
+    assert gap_segments(transcript, recognized, 24)[0][-1]["end"] == 24
+    # A long recording by itself is not evidence of an omitted advert.
+    assert gap_segments(transcript, recognized[:2], 500) == ([], [])
+
+
+def test_known_gaps_bound_mfa_padding_and_reject_overrides_into_adverts(tmp_path):
+    source = tmp_path / "episode.txt"
+    source.write_text("Welcome to our show. The new story starts here.")
+    transcript = parse_transcript(source)
+    # MFA and ASR disagree by a fraction of a second; normal padding would
+    # otherwise extend into the advert on both sides.
+    initial = [{"start": 0, "end": 2.2}, {"start": 61.8, "end": 64}]
+    gaps = [{"begin": 2.5, "end": 61.5}]
+    windows, _ = search_windows(transcript, initial, 65, gaps=gaps)
+    assert windows[0]["end"] == 2.5
+    assert windows[1]["begin"] == 61.5
+    with pytest.raises(PracticeError, match="搜尋範圍跨過缺稿區間"):
+        search_windows(
+            transcript,
+            initial,
+            65,
+            gaps=gaps,
+            overrides=[{"id": 0, "begin": 0, "end": 3}],
+        )
+
+
+def test_ad_boundary_keeps_short_transitions_and_misrecognized_names(tmp_path):
+    source = tmp_path / "episode.txt"
+    source.write_text(
+        "Our technology story. Great point. Okay, Maria, Zephyr Ventures begins here today."
+    )
+    transcript = parse_transcript(source)
+    recognized = [
+        {"text": word, "start": i * 0.4, "end": (i + 1) * 0.4}
+        for i, word in enumerate("our technology story great point".split())
+    ]
+    recognized.extend(
+        {"text": word, "start": 62 + i * 0.4, "end": 62.4 + i * 0.4}
+        for i, word in enumerate("okay taylor ziffer partners begins here today".split())
+    )
+    segments, gaps = gap_segments(transcript, recognized, 66)
+    assert len(gaps) == 1
+    assert gaps[0]["begin"] >= 2
+    assert gaps[0]["end"] < 62
+    assert segments[-2]["token_end"] == transcript.sentences[1].words[-1].norm_end
+    restored = [
+        token
+        for s in segments
+        for token in transcript.normalized[s["token_start"] : s["token_end"]]
+    ]
+    assert restored == transcript.normalized
 
 
 def test_music_and_untranscribed_outro_are_bounded_automatically(tmp_path):
