@@ -108,6 +108,7 @@ def search_windows(
         match_anchors(transcript, recognized) if recognized is not None else ({}, None)
     )
     windows = []
+    baseline_windows = []
     for i, (sentence, baseline) in enumerate(zip(transcript.sentences, initial, strict=True)):
         begin = (
             (initial[i - 1]["end"] + baseline["start"]) / 2
@@ -115,6 +116,9 @@ def search_windows(
             else max(0, baseline["start"] - 0.4)
         )
         end = (baseline["end"] + initial[i + 1]["start"]) / 2 if i + 1 < len(initial) else duration
+        baseline_windows.append(
+            {"id": i, "begin": round(begin, 4), "end": round(end, 4), "adjusted": False}
+        )
         adjusted = False
         start_token, end_token = sentence.words[0].norm_start, sentence.words[-1].norm_end
         first = [
@@ -144,14 +148,40 @@ def search_windows(
         windows.append(
             {"id": i, "begin": round(begin, 4), "end": round(end, 4), "adjusted": adjusted}
         )
-    # Reconcile neighboring windows without introducing overlap; leave actual gaps blank.
-    for i in range(1, len(windows)):
-        left, right = windows[i - 1], windows[i]
-        if left["end"] > right["begin"]:
+    # A coarse anchor can land on a neighboring repetition. Reject conflicting
+    # automatic adjustments instead of averaging away an entire short sentence.
+    # Retry from the proposals so a reverted boundary cannot affect earlier ones.
+    proposed = windows
+    while True:
+        windows = [dict(window) for window in proposed]
+        conflicts = []
+        group_start = 0
+        for i, right in enumerate(windows):
+            if not (0 <= right["begin"] < right["end"] <= duration + 0.01):
+                conflicts = [i]
+                break
+            if not i:
+                continue
+            left = windows[i - 1]
+            if left["end"] <= right["begin"]:
+                group_start = i
+                continue
             if transcript.sentences[i].supplied_start is not None:
                 raise PracticeError("提供的字幕搜尋範圍有重疊。")
-            boundary = (left["end"] + right["begin"]) / 2
-            left["end"] = right["begin"] = round(boundary, 4)
+            boundary = round((left["end"] + right["begin"]) / 2, 4)
+            if not (left["begin"] < boundary < right["end"]):
+                conflicts = list(range(group_start, i + 1))
+                break
+            left["end"] = right["begin"] = boundary
+        fallback = [
+            i
+            for i in conflicts
+            if proposed[i]["adjusted"] and transcript.sentences[i].supplied_start is None
+        ]
+        if not fallback:
+            break
+        for i in fallback:
+            proposed[i] = {**baseline_windows[i], "anchor_fallback": True}
     # Explicit ranges are authoritative: reject overlap rather than silently changing them.
     if overrides:
         for row in overrides:
@@ -162,6 +192,7 @@ def search_windows(
                 windows[index].update(
                     {"begin": float(row["begin"]), "end": float(row["end"]), "adjusted": True}
                 )
+                windows[index].pop("anchor_fallback", None)
             except (KeyError, TypeError, ValueError) as exc:
                 raise PracticeError(
                     "--windows 檔案需為 [{id, begin, end}, ...]，時間單位是秒。"

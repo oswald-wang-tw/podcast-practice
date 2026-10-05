@@ -83,6 +83,14 @@ def quality_report(
                 }
             )
     for sentence, window in zip(sentences, windows, strict=True):
+        if window.get("anchor_fallback"):
+            warnings.append(
+                {
+                    "type": "anchor_conflict",
+                    "sentence": sentence["id"],
+                    "message": "粗定位與相鄰句子範圍衝突，已使用第一輪 MFA 範圍，請抽聽核對。",
+                }
+            )
         if window.get("adjusted") and (
             sentence["start"] - window["begin"] < 0.025 or window["end"] - sentence["end"] < 0.025
         ):
