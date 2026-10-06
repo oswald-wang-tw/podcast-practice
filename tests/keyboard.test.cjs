@@ -238,6 +238,63 @@ test('play and replay cancel a pending loop without leaving a timer behind', () 
   f.key('r'); assert.equal(f.timers.size, 0); assert.equal(audio.currentTime, 0.9);
 });
 
+function adjacentSentences() {
+  return {duration: 10, chapters: [{title: 'Start', sentence: 0}], review: {warnings: []},
+    sentences: [
+      {id: 0, start: 1, end: 3, speaker: 'Host', text: 'Finished sentence', words: [{text: 'Finished', start: 1, end: 3}]},
+      {id: 1, start: 3.05, end: 5, speaker: 'Host', text: 'Next sentence', words: [{text: 'Next', start: 3.05, end: 5}]},
+    ]};
+}
+
+test('sentence-end pause keeps the completed sentence active and V reveals it at adjacent boundaries', () => {
+  for (const boundary of [3.05, 3.2]) {
+    const f = fixture('player', adjacentSentences()), audio = f.elements.get('audio');
+    const rows = f.elements.get('transcript').children;
+    f.key('p'); f.key('h'); f.key(' ');
+    audio.currentTime = boundary; f.runFrame();
+    assert.equal(audio.paused, true);
+    assert.match(f.elements.get('status').textContent, /第 1 句已播完/);
+    audio.dispatchEvent({type: 'timeupdate'});
+    assert.equal(rows[0].classList.contains('active'), true);
+    assert.equal(rows[1].classList.contains('active'), false);
+    assert.equal(rows[1].children[1].children.at(-1).children[0].classList.contains('spoken'), false);
+    f.key('v'); assert.equal(rows[0].classList.contains('revealed'), true);
+    assert.equal(rows[1].classList.contains('revealed'), false);
+    f.key('v'); assert.equal(rows[0].classList.contains('revealed'), false);
+    f.key(' '); assert.equal(audio.currentTime, 0.9);
+    assert.equal(audio.paused, false);
+    audio.currentTime = boundary; f.runFrame();
+    f.key('ArrowRight'); assert.ok(Math.abs(audio.currentTime - 2.95) < 1e-9);
+    assert.equal(rows[1].classList.contains('active'), true);
+    f.key('v'); assert.equal(rows[1].classList.contains('revealed'), true);
+  }
+});
+
+test('sentence-end pause retains its sentence when the next update lands in an untranscribed gap', () => {
+  const f = fixture(), audio = f.elements.get('audio'), rows = f.elements.get('transcript').children;
+  f.key('p'); f.key('h'); f.key(' ');
+  audio.currentTime = 4; f.runFrame();
+  assert.equal(audio.paused, true);
+  assert.equal(rows[0].classList.contains('active'), true);
+  f.key('v'); assert.equal(rows[0].classList.contains('revealed'), true);
+});
+
+test('loop waiting and sentence-end pause retain the target until leaving practice mode', () => {
+  for (const mode of ['l', 'p']) {
+    const f = fixture('player', adjacentSentences()), audio = f.elements.get('audio');
+    const rows = f.elements.get('transcript').children;
+    f.key(mode); f.key('h'); f.key(' ');
+    audio.currentTime = 3.2; f.runFrame();
+    assert.equal(f.timers.size, mode === 'l' ? 1 : 0);
+    assert.equal(rows[0].classList.contains('active'), true);
+    f.key('v'); assert.equal(rows[0].classList.contains('revealed'), true);
+    assert.equal(rows[1].classList.contains('revealed'), false);
+    f.key(mode); assert.equal(f.timers.size, 0);
+    assert.equal(rows[1].classList.contains('active'), true);
+    assert.equal(rows[1].classList.contains('selected'), true);
+  }
+});
+
 test('slash focuses and selects search; Escape clears it and leaves search', () => {
   const f = fixture(), search = f.elements.get('search'); search.value = 'word';
   f.key('/'); assert.equal(f.document.activeElement, search); assert.deepEqual(search.selection, [0, 4]);

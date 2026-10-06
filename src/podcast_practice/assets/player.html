@@ -65,18 +65,20 @@ function jump(i,play){cancelLoop();choose(i);lastScroll=-1;audio.currentTime=cli
 function togglePlay(){if(loopWaiting){cancelLoop();audio.pause();return;}if(!audio.paused){cancelLoop();audio.pause();return;}if(($('loop').checked||$('pauseEnd').checked)&&(audio.currentTime<clipStart()||audio.currentTime>=clipEnd()))audio.currentTime=clipStart();playAudio();}
 function lastBefore(list,t){let lo=0,hi=list.length-1,ans=-1;while(lo<=hi){const mid=(lo+hi)>>1;if(list[mid].start<=t){ans=mid;lo=mid+1;}else hi=mid-1;}return ans;}
 function update(){const t=audio.currentTime;
- let si=lastBefore(sentences,t);if(si>=0&&t>sentences[si].end+.15)si=-1;
+ // A single-sentence exercise stays on its target through preroll, pauses and loop gaps.
+ const sentenceMode=$('loop').checked||$('pauseEnd').checked;
+ let si=sentenceMode?selected:lastBefore(sentences,t);if(!sentenceMode&&si>=0&&t>sentences[si].end+.15)si=-1;
  // Read geometry before changing classes or controls to avoid forced full-page layout.
  let scrollBehavior=null;
  if(si>=0&&$('follow').checked&&lastScroll!==si){const rect=rows[si].getBoundingClientRect(),player=$('status').getBoundingClientRect();if(rect.top<player.bottom+20||rect.bottom>window.innerHeight-80)scrollBehavior=Math.abs(rect.top-player.bottom)>window.innerHeight?'auto':'smooth';lastScroll=si;}
  const clock=fmt(t);if(clock!==lastClock){$('now').textContent=clock;lastClock=clock;}
  const progress=Math.floor(t*10);if(!seekDragging&&progress!==lastSeek){$('seek').value=t;lastSeek=progress;}
- const wi=lastBefore(timedWords,t);const w=wi>=0&&t<=timedWords[wi].end?wi:-1;
+ const wi=lastBefore(timedWords,t);const w=wi>=0&&t<=timedWords[wi].end&&timedWords[wi].sentence===si?wi:-1;
  if(w!==spoken){if(spoken>=0)wordEls[spoken].classList.remove('spoken');if(w>=0)wordEls[w].classList.add('spoken');spoken=w;}
- if(si!==active){if(active>=0)rows[active].classList.remove('active');active=si;if(si>=0){rows[si].classList.add('active');if(!$('loop').checked&&!$('pauseEnd').checked)choose(si);}syncReveal();}
+ if(si!==active){if(active>=0)rows[active].classList.remove('active');active=si;if(si>=0){rows[si].classList.add('active');if(!sentenceMode)choose(si);}syncReveal();}
  if(scrollBehavior!==null)rows[si].scrollIntoView({block:'center',behavior:scrollBehavior});
  let chap=0;DATA.chapters.forEach((c,i)=>{if(t>=sentences[c.sentence].start)chap=i;});if(chap!==currentChapter){if(currentChapter>=0)chapterEls[currentChapter].classList.remove('current');chapterEls[chap]?.classList.add('current');currentChapter=chap;}
- if(!audio.paused&&!loopWaiting&&($('loop').checked||$('pauseEnd').checked)&&t>=clipEnd()){
+ if(!audio.paused&&!loopWaiting&&sentenceMode&&t>=clipEnd()){
   if($('loop').checked){scheduleLoop();}else{audio.pause();status(`第 ${selected+1} 句已播完。按播放重聽，或按下一句繼續。`);}
  }
 }
@@ -90,8 +92,8 @@ audio.addEventListener('error',()=>{$('status').classList.add('error');$('status
 $('speed').addEventListener('change',()=>{audio.playbackRate=Number($('speed').value);});
 $('seek').addEventListener('input',()=>{cancelLoop();seekDragging=true;lastScroll=-1;audio.currentTime=Number($('seek').value);const i=lastBefore(sentences,audio.currentTime);if(i>=0)choose(i);update();});$('seek').addEventListener('change',()=>{seekDragging=false;lastSeek=-1;update();});
 $('follow').addEventListener('change',()=>{lastScroll=-1;update();status($('follow').checked?'自動跟隨已開啟。':'自動跟隨已關閉。');});
-$('loop').addEventListener('change',()=>{cancelLoop();if($('loop').checked){$('pauseEnd').checked=false;if(active>=0)choose(active);if(audio.currentTime>=clipEnd()||audio.currentTime<clipStart())audio.currentTime=clipStart();status('循環目前選取的句子；點選另一句即可切換。');}else status('循環已關閉。');});
-$('pauseEnd').addEventListener('change',()=>{cancelLoop();if($('pauseEnd').checked){$('loop').checked=false;if(active>=0)choose(active);if(audio.currentTime>=clipEnd())audio.currentTime=clipStart();status('每句結尾暫停，方便跟讀。');}else status('句尾暫停已關閉。');});
+$('loop').addEventListener('change',()=>{cancelLoop();if($('loop').checked){$('pauseEnd').checked=false;if(active>=0)choose(active);if(audio.currentTime>=clipEnd()||audio.currentTime<clipStart())audio.currentTime=clipStart();status('循環目前選取的句子；點選另一句即可切換。');}else status('循環已關閉。');update();});
+$('pauseEnd').addEventListener('change',()=>{cancelLoop();if($('pauseEnd').checked){$('loop').checked=false;if(active>=0)choose(active);if(audio.currentTime>=clipEnd())audio.currentTime=clipStart();status('每句結尾暫停，方便跟讀。');}else status('句尾暫停已關閉。');update();});
 $('hide').addEventListener('click',()=>{hidden=!hidden;$('transcript').classList.toggle('hidden-text',hidden);$('hide').textContent=hidden?'顯示原稿':'隱藏原稿';$('hide').setAttribute('aria-pressed',String(hidden));$('reveal').hidden=!hidden;rows.forEach(r=>r.classList.remove('revealed'));syncReveal();});$('reveal').addEventListener('click',()=>{const i=active>=0?active:selected;rows[i].classList.toggle('revealed');syncReveal();});
 $('search').addEventListener('input',()=>{const q=$('search').value.trim().toLowerCase();let first=-1,hits=0;sentences.forEach((s,i)=>{const match=q&&s.text.toLowerCase().includes(q);rows[i].classList.toggle('match',Boolean(match));if(match){hits++;if(first<0)first=i;}});if(q){$('follow').checked=false;if(first>=0)rows[first].scrollIntoView({block:'center',behavior:'smooth'});status(`找到 ${hits} 句。已暫停自動跟隨，點選結果即可播放。`);}else status('搜尋已清除。');});
 function seekBy(seconds){
