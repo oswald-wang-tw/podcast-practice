@@ -415,6 +415,7 @@ def test_mp3_probe_rejects_non_mp3_content_and_disallows_network_protocols(
         with pytest.raises(PracticeError, match="有效的 MP3"):
             validate_audio(runtime, tmp_path / "input.mp3")
     command = commands[0]
+    assert command[0] == str(runtime.ffprobe)
     assert command[command.index("-f") + 1] == "mp3"
     assert command[command.index("-protocol_whitelist") + 1] == "file,pipe"
 
@@ -436,8 +437,17 @@ def test_stopping_service_terminates_build_process_and_marks_failure(
             ready.set()
 
     def start_process(command, **kwargs):
+        if "-m" not in command:
+            return real_popen(command, **kwargs)
         child = real_popen(
-            [command[0], "-u", "-c", "import time; print('MFA 第一輪'); time.sleep(60)"],
+            [
+                command[0],
+                "-u",
+                "-c",
+                "import subprocess, sys, time; "
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+                "print('MFA 第一輪'); time.sleep(60)",
+            ],
             **kwargs,
         )
         processes.append(child)
@@ -453,3 +463,4 @@ def test_stopping_service_terminates_build_process_and_marks_failure(
     assert processes[0].poll() is not None
     assert uploads.status(job["id"])["state"] == "failed"
     assert uploads._active is None
+    assert not uploads._thread.is_alive()

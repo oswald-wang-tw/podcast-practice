@@ -7,7 +7,6 @@ import os
 import re
 import secrets
 import shutil
-import signal
 import subprocess
 import sys
 import threading
@@ -17,6 +16,7 @@ from typing import BinaryIO
 from urllib.parse import quote
 
 from .errors import PracticeError
+from .processes import process_group_options, stop_process
 from .runtime import Runtime
 from .transcript import parse_transcript
 
@@ -75,7 +75,7 @@ def validate_audio(runtime: Runtime, path: Path) -> None:
     try:
         result = subprocess.run(
             [
-                str(runtime.bin / "ffprobe"),
+                str(runtime.ffprobe),
                 "-v",
                 "error",
                 "-f",
@@ -93,6 +93,7 @@ def validate_audio(runtime: Runtime, path: Path) -> None:
             env=runtime.environment(),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         streams = json.loads(result.stdout).get("streams", [])
@@ -258,14 +259,16 @@ class Uploads:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    encoding="utf-8",
                     errors="replace",
                     bufsize=1,
-                    start_new_session=True,
+                    env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+                    **process_group_options(),
                 )
                 with self._lock:
                     self._process = process
                     if self._closing:
-                        os.killpg(process.pid, signal.SIGTERM)
+                        self._stop(process)
                 assert process.stdout is not None
                 for line in process.stdout:
                     log.write(line)
@@ -320,18 +323,7 @@ class Uploads:
 
     @staticmethod
     def _stop(process: subprocess.Popen | None) -> None:
-        if process and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=5)
-            except ProcessLookupError:
-                pass
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
+        stop_process(process, process_group=True)
 
     def close(self) -> None:
         with self._lock:
