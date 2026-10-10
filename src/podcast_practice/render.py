@@ -144,11 +144,16 @@ def library_html(root: Path, token: str | None = None, upload: dict | None = Non
     for created, directory, data in episodes:
         count = len(data["sentences"])
         duration = f"{int(data['duration'] // 60):02}:{int(data['duration'] % 60):02}"
+        progress_id = html.escape(
+            data.get("audio_sha256") or data.get("fingerprint") or "", quote=True
+        )
         items.append(
             f'<article class="episode"><a href="{quote(directory)}/player.html">'
             f"<strong>{html.escape(data['title'])}</strong>"
             f'<span class="meta">{html.escape(created)} · {count} 句 · '
-            f"{duration}</span></a>"
+            f"{duration}</span>"
+            f'<span class="meta episode-progress" data-progress-id="{progress_id}" '
+            f'data-duration="{data["duration"]}" hidden></span></a>'
             f'<button class="delete" data-action="delete" '
             f'data-episode="{html.escape(directory, quote=True)}" '
             f'aria-label="刪除 {html.escape(data["title"], quote=True)}">刪除</button></article>'

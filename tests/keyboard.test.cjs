@@ -17,9 +17,12 @@ class Classes {
   }
 }
 
-function fixture(page = 'player', suppliedData) {
+function fixture(page = 'player', suppliedData, options = {}) {
   const html = readFileSync(join(__dirname, '../src/podcast_practice/assets', `${page}.html`), 'utf8');
   const listeners = new Map(), elements = new Map(), timers = new Map(), frames = new Map();
+  const windowListeners = new Map(), storage = options.storage || new Map();
+  const storageStats = {reads: 0, writes: 0};
+  let clock = 10000;
   const stats = {classOps: 0, textWrites: 0, attributeWrites: 0, geometryReads: 0, scrolls: 0};
   let timerId = 0, frameId = 0, plays = 0;
   class Element {
@@ -80,33 +83,50 @@ function fixture(page = 'player', suppliedData) {
     getElementById: id => elements.get(id),
     createElement: tag => new Element(tag),
     addEventListener: (key, fn) => { const list = listeners.get(key) || []; list.push(fn); listeners.set(key, list); },
+    dispatchEvent: event => { for (const fn of listeners.get(event.type) || []) fn(event); },
     querySelector: selector => selector === 'dialog[open]' ? [...elements.values()].find(el => el.tagName === 'DIALOG' && el.open) : null,
-    querySelectorAll: selector => selector === '#episodes a' ? elements.get('episodes').children : [],
+    querySelectorAll: selector => selector === '#episodes a' ? elements.get('episodes').children :
+      selector === '#episodes .episode-progress' ? elements.get('episodes').children.flatMap(link => link.children) : [],
   };
   document.activeElement = document.body;
   const data = suppliedData || {
-    title: 'Keyboard fixture', duration: 20, review: {warnings: []}, chapters: [{title: 'Start', sentence: 0}],
+    title: 'Keyboard fixture', audio_sha256: 'fixture-audio', duration: 20, review: {warnings: []}, chapters: [{title: 'Start', sentence: 0}],
     sentences: [1, 6, 12].map((start, id) => ({id, start, end: start + 2, speaker: 'Host', text: `Sentence ${id}`, words: [{text: `word${id}`, start, end: start + 1}]})),
   };
   if (page === 'player') {
     elements.get('alignment-data').textContent = JSON.stringify(data);
     const audio = elements.get('audio'); audio.paused = true; audio.currentTime = 0;
+    audio.duration = data.duration; audio.readyState = options.readyState ?? 1;
     audio.play = async () => { plays++; audio.paused = false; audio.dispatchEvent({type: 'play'}); };
     audio.pause = () => { const playing = !audio.paused; audio.paused = true; if (playing) audio.dispatchEvent({type: 'pause'}); };
     elements.get('speed').options = ['0.6', '0.75', '0.85', '1', '1.1', '1.25'].map(value => ({value, textContent: `${value}×`}));
     elements.get('speed').value = '1'; elements.get('gap').value = '1';
   } else {
     elements.get('library-config').textContent = JSON.stringify({token: null});
-    for (let i = 0; i < 3; i++) { const link = new Element('a'); link.id = `episode-${i}`; elements.get('episodes').append(link); }
+    for (let i = 0; i < 3; i++) {
+      const link = new Element('a'); link.id = `episode-${i}`; link.href = `/episode-${i}/player.html`;
+      const label = new Element('span'); label.className = 'meta episode-progress';
+      label.dataset = {progressId: `episode-${i}`, duration: '20'}; label.hidden = true;
+      link.append(label); elements.get('episodes').append(link);
+    }
   }
+  const window = {innerHeight: 1000, addEventListener: (key, fn) => {
+    const list = windowListeners.get(key) || []; list.push(fn); windowListeners.set(key, list);
+  }};
   const context = {
-    document, window: {innerHeight: 1000}, location: {protocol: 'http:'},
+    document, window, location: {protocol: 'http:', pathname: '/fixture/player.html', href: 'http://localhost/fixture/player.html'},
+    URL, Date: {now: () => clock},
+    localStorage: {
+      getItem: key => { storageStats.reads++; if (options.storageError === 'read') throw new Error('Storage blocked'); return storage.get(key) ?? null; },
+      setItem: (key, value) => { if (options.storageError === 'write') throw new Error('Quota exceeded'); storageStats.writes++; storage.set(key, value); },
+    },
     Event: class { constructor(type) { this.type = type; } },
     requestAnimationFrame: fn => { frames.set(++frameId, fn); return frameId; },
     cancelAnimationFrame: id => frames.delete(id),
     setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
     clearTimeout: id => timers.delete(id),
   };
+  if (options.storageError === 'access') Object.defineProperty(context, 'localStorage', {get() { throw new Error('Storage blocked'); }});
   vm.runInNewContext(html.match(/<script>\s*([\s\S]*?)<\/script>/)[1], context);
   function key(key, options = {}) {
     const event = {key, code: key === ' ' ? 'Space' : key, target: document.activeElement, preventDefault() { this.defaultPrevented = true; }, ...options};
@@ -115,7 +135,11 @@ function fixture(page = 'player', suppliedData) {
     return event;
   }
   function runFrame() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); }
-  return {key, elements, document, data, timers, frames, stats, runFrame, get plays() { return plays; }, Element};
+  return {key, elements, document, data, timers, frames, stats, runFrame, storage, storageStats,
+    advance: ms => { clock += ms; },
+    windowEvent: event => { for (const fn of windowListeners.get(event.type) || []) fn(event); },
+    loadMetadata: (duration = data.duration) => { const audio = elements.get('audio'); audio.duration = duration; audio.readyState = 1; audio.dispatchEvent({type: 'loadedmetadata'}); },
+    get plays() { return plays; }, Element};
 }
 
 test('sentence navigation stops at the ends, replay works, and seeking stays in bounds', () => {
@@ -352,4 +376,144 @@ test('library keys leave form controls, deletion dialogs, and an empty library a
   f.elements.get('purge-dialog').close(); f.document.body.focus();
   f.key('?', {isComposing: true}); assert.equal(f.elements.get('shortcut-dialog').open, false);
   f.elements.get('episodes').children = []; assert.equal(f.key('ArrowDown').defaultPrevented, undefined);
+});
+
+const progressKey = id => `podcast-practice:progress:v1:${id}`;
+const storedProgress = (storage, id = 'fixture-audio') => JSON.parse(storage.get(progressKey(id)));
+const record = (time, selected = 1) => JSON.stringify({version: 1, time, duration: 20, selected, updatedAt: 1});
+
+test('progress waits for metadata, restores time and highlights without playing, and never restores twice', () => {
+  const storage = new Map([[progressKey('fixture-audio'), record(7.25)]]);
+  const f = fixture('player', undefined, {storage, readyState: 0}), audio = f.elements.get('audio');
+  audio.dispatchEvent({type: 'timeupdate'}); f.windowEvent({type: 'pagehide'});
+  assert.equal(audio.currentTime, 0); assert.equal(storedProgress(storage).time, 7.25);
+  assert.equal(f.storageStats.writes, 0);
+  f.loadMetadata();
+  assert.equal(audio.currentTime, 7.25); assert.equal(audio.paused, true); assert.equal(f.plays, 0);
+  assert.equal(f.elements.get('seek').value, '7.25');
+  assert.equal(f.elements.get('transcript').children[1].classList.contains('selected'), true);
+  assert.match(f.elements.get('status').textContent, /已恢復上次進度 00:07/);
+  audio.currentTime = 8; f.loadMetadata(); assert.equal(audio.currentTime, 8);
+});
+
+test('time updates throttle writes while pause, seek, hidden page and navigation flush the latest position', () => {
+  const f = fixture(), audio = f.elements.get('audio');
+  audio.currentTime = 6.3; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(storedProgress(f.storage).time, 6.3); assert.equal(f.storageStats.writes, 1);
+  f.advance(100); audio.currentTime = 6.4; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(f.storageStats.writes, 1);
+  f.advance(2000); audio.currentTime = 6.6; audio.dispatchEvent({type: 'timeupdate'});
+  assert.equal(storedProgress(f.storage).time, 6.6); assert.equal(f.storageStats.writes, 2);
+  f.key(' '); audio.currentTime = 6.8; f.key(' ');
+  assert.equal(storedProgress(f.storage).time, 6.8);
+  audio.currentTime = 7.1; audio.dispatchEvent({type: 'seeked'});
+  assert.equal(storedProgress(f.storage).time, 7.1);
+  audio.currentTime = 7.2; f.document.visibilityState = 'hidden'; f.document.dispatchEvent({type: 'visibilitychange'});
+  assert.equal(storedProgress(f.storage).time, 7.2);
+  audio.currentTime = 7.3; f.windowEvent({type: 'pagehide'});
+  assert.equal(storedProgress(f.storage).time, 7.3);
+  const seek = f.elements.get('seek'); seek.value = '12.25';
+  seek.dispatchEvent({type: 'input'}); seek.dispatchEvent({type: 'change'});
+  assert.equal(storedProgress(f.storage).time, 12.25);
+});
+
+test('episodes with identical titles save independently, and renamed players keep their audio progress', () => {
+  const base = fixture().data, storage = new Map();
+  const a = fixture('player', {...base, audio_sha256: 'audio-a'}, {storage});
+  const b = fixture('player', {...base, audio_sha256: 'audio-b'}, {storage});
+  a.elements.get('audio').currentTime = 7; a.windowEvent({type: 'pagehide'});
+  b.elements.get('audio').currentTime = 13; b.windowEvent({type: 'pagehide'});
+  assert.equal(storage.size, 2);
+  const renamed = fixture('player', {...base, title: 'New title', audio_sha256: 'audio-a'}, {storage});
+  assert.equal(renamed.elements.get('audio').currentTime, 7);
+  assert.equal(renamed.plays, 0);
+  renamed.elements.get('restart').click();
+  assert.equal(renamed.elements.get('audio').currentTime, 0);
+  assert.equal(renamed.elements.get('audio').paused, true);
+  assert.equal(storedProgress(storage, 'audio-a').time, 0);
+  assert.equal(storedProgress(storage, 'audio-b').time, 13);
+});
+
+test('ended progress stays at the end on reopen until restarting, and unmodified stale tabs do not overwrite it', () => {
+  const storage = new Map(), idle = fixture('player', undefined, {storage});
+  const playing = fixture('player', undefined, {storage}), audio = playing.elements.get('audio');
+  audio.currentTime = 20; audio.dispatchEvent({type: 'ended'});
+  assert.equal(storedProgress(storage).time, 20);
+  idle.windowEvent({type: 'pagehide'}); assert.equal(storedProgress(storage).time, 20);
+  const reopened = fixture('player', undefined, {storage});
+  assert.equal(reopened.elements.get('audio').currentTime, 20); assert.equal(reopened.plays, 0);
+  reopened.elements.get('restart').click(); assert.equal(storedProgress(storage).time, 0);
+});
+
+test('user navigation before metadata takes priority over previously saved progress', () => {
+  for (const action of ['restart', 'sentence', 'seek']) {
+    const storage = new Map([[progressKey('fixture-audio'), record(13, 2)]]);
+    const f = fixture('player', undefined, {storage, readyState: 0});
+    if (action === 'restart') f.elements.get('restart').click();
+    else if (action === 'sentence') f.key('ArrowRight');
+    else { f.elements.get('seek').value = '4.5'; f.elements.get('seek').dispatchEvent({type: 'input'}); }
+    f.loadMetadata();
+    const expected = action === 'restart' ? 0 : action === 'sentence' ? 5.9 : 4.5;
+    assert.equal(f.elements.get('audio').currentTime, expected);
+    assert.equal(storedProgress(storage).time, expected);
+  }
+});
+
+test('restoring gaps preserves exact audio time and oversized positions clamp to the actual duration', () => {
+  const storage = new Map([[progressKey('fixture-audio'), record(4.5, 0)]]);
+  const gap = fixture('player', undefined, {storage});
+  assert.equal(gap.elements.get('audio').currentTime, 4.5);
+  assert.equal(gap.elements.get('transcript').children.some(row => row.classList.contains('active')), false);
+  storage.set(progressKey('fixture-audio'), record(200, 999));
+  const clamped = fixture('player', undefined, {storage, readyState: 0}); clamped.loadMetadata(19.8);
+  assert.equal(clamped.elements.get('audio').currentTime, 19.8); assert.equal(clamped.plays, 0);
+});
+
+test('malformed and invalid records are ignored, and blocked or full storage leaves playback usable', () => {
+  for (const value of ['{bad json', 'null', '[]', '{"version":2,"time":7}', '{"version":1,"time":-1}', '{"version":1,"time":"7"}', '{"version":1,"time":null}']) {
+    const storage = new Map([[progressKey('fixture-audio'), value]]), f = fixture('player', undefined, {storage});
+    assert.equal(f.elements.get('audio').currentTime, 0);
+    f.key('ArrowRight'); assert.equal(storedProgress(storage).time, 5.9);
+  }
+  for (const storageError of ['access', 'read', 'write']) {
+    const f = fixture('player', undefined, {storageError});
+    f.key('ArrowRight'); assert.equal(f.plays, 1);
+    assert.match(f.elements.get('progress-status').textContent, /無法儲存進度/);
+    f.elements.get('restart').click(); assert.equal(f.elements.get('audio').currentTime, 0);
+    assert.equal(f.elements.get('audio').paused, true);
+  }
+});
+
+test('legacy players use their fingerprint or page path to keep progress', () => {
+  const base = fixture().data;
+  for (const identity of [{fingerprint: 'legacy-episode'}, {}]) {
+    const data = {...base, audio_sha256: undefined, ...identity}, storage = new Map();
+    const f = fixture('player', data, {storage}); f.key('ArrowRight');
+    assert.equal(storedProgress(storage, identity.fingerprint || '/fixture/player.html').time, 5.9);
+    assert.equal(fixture('player', data, {storage}).elements.get('audio').currentTime, 5.9);
+  }
+});
+
+test('library displays per-episode progress and refreshes on return and storage changes', () => {
+  const storage = new Map([[progressKey('episode-0'), record(7)], [progressKey('episode-1'), record(20)]]);
+  const f = fixture('library', undefined, {storage}), labels = f.elements.get('episodes').children.map(link => link.children[0]);
+  assert.equal(labels[0].hidden, false); assert.equal(labels[0].textContent, '上次停在 00:07 · 35%');
+  assert.equal(labels[1].textContent, '已播至結尾 · 100%'); assert.equal(labels[2].hidden, true);
+  storage.set(progressKey('episode-0'), record(10)); f.windowEvent({type: 'pageshow'});
+  assert.equal(labels[0].textContent, '上次停在 00:10 · 50%');
+  storage.set(progressKey('episode-0'), record(0)); f.windowEvent({type: 'storage', key: progressKey('episode-0')});
+  assert.equal(labels[0].textContent, '上次停在 00:00 · 0%');
+  storage.clear(); f.windowEvent({type: 'storage', key: null}); assert.ok(labels.every(label => label.hidden));
+  assert.equal(f.storageStats.writes, 0);
+});
+
+test('library ignores damaged records and supports legacy path identities without breaking navigation', () => {
+  const storage = new Map([[progressKey('episode-0'), '{broken']]);
+  const f = fixture('library', undefined, {storage}), label = f.elements.get('episodes').children[0].children[0];
+  assert.equal(label.hidden, true); label.dataset.progressId = '';
+  storage.set(progressKey('/episode-0/player.html'), record(8)); f.windowEvent({type: 'focus'});
+  assert.equal(label.textContent, '上次停在 00:08 · 40%');
+  const blocked = fixture('library', undefined, {storageError: 'access'});
+  assert.match(blocked.elements.get('progress-note').textContent, /無法讀取/);
+  blocked.key('ArrowDown'); assert.equal(blocked.document.activeElement.id, 'episode-0');
 });

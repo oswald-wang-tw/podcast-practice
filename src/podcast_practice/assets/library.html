@@ -10,6 +10,7 @@
 dialog{max-width:480px;width:calc(100% - 36px);border:1px solid var(--line);border-radius:14px;padding:26px;background:#fffdf9;color:var(--ink)}dialog::backdrop{background:#242a2c66}dialog h2{font-size:21px;margin:0 0 16px}dialog p{line-height:1.7;overflow-wrap:anywhere}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}#purge-confirm{background:#943f31;color:white;border-color:#943f31}@media(max-width:600px){#trash .episode{flex-wrap:wrap}#trash .episode>div{flex-basis:100%!important}}
 kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 6px;white-space:nowrap}.library-keys{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.library-keys button{font-size:13px}.episode:focus-within{border-color:#619891;background:#e8f0eb}#shortcut-dialog{max-height:85vh;overflow:auto}.shortcut-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.shortcut-heading h2{margin:0}.shortcut-list{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:12px 20px;font-size:14px;line-height:1.6}.shortcut-list dt,.shortcut-list dd{margin:0}.shortcut-list dd{align-self:center}
 .upload{padding:24px;margin:26px 0;border:1px solid var(--line);border-radius:14px;background:#fffdf9}.upload h2{font-size:20px;margin:0 0 8px}.upload .help{margin:0 0 18px}.upload fieldset{border:0;padding:0;margin:0;min-width:0}.drop-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.drop-zone{display:flex;position:relative;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:22px 14px;border:2px dashed #c9cfc5;border-radius:10px;background:var(--paper);cursor:pointer;text-align:center;min-width:0;transition:background .15s,border-color .15s}.drop-zone:hover,.drop-zone.dragover{background:#e8f0eb;border-color:var(--green)}.drop-zone:focus-within{outline:3px solid #619891;outline-offset:3px}.drop-zone strong{font-size:16px}.drop-zone .file-name{font-size:13px;color:var(--muted);overflow-wrap:anywhere;max-width:100%}.drop-zone .file-type{font-size:11px;color:var(--muted)}.file-input{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.upload-row{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-top:18px}.upload-title{display:flex;flex:1;min-width:180px;flex-direction:column;gap:7px;font-size:13px;color:var(--muted)}.upload-title input{font:inherit;width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--paper);color:var(--ink)}.upload-title input:focus-visible{outline:3px solid #619891;outline-offset:3px}.upload-submit{background:var(--green);border-color:var(--green);color:white;padding:10px 16px}.upload-submit:hover{background:#1d4f49}.upload fieldset:disabled .drop-zone{opacity:.55;cursor:default}.upload-progress{width:100%;height:8px;accent-color:var(--green);margin-top:20px}.upload-status{font-size:13px;line-height:1.7;color:var(--muted);margin:12px 0 0;overflow-wrap:anywhere}.upload-status.error,.upload-error{color:#943f31}.upload-error{font-size:13px;line-height:1.7}.upload-result{display:inline-block;margin-top:10px;color:var(--green)}.upload-log{margin-top:12px;padding-top:12px}.upload-log pre{max-height:240px;overflow:auto;font-size:11px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.upload [hidden]{display:none}
+.episode-progress{color:var(--green)}.episode-progress[hidden]{display:none}
 @media(max-width:600px){.upload{padding:18px}.drop-grid{grid-template-columns:1fr}.drop-zone{padding:18px 12px}.upload-title{flex-basis:100%}.upload-row button{flex:1}}
 </style>
 </head>
@@ -37,6 +38,7 @@ kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1
  <details id="upload-log" class="upload-log" hidden><summary>建置紀錄</summary><pre id="upload-log-text"></pre></details>
 </section>
 <div id="notice" class="notice" role="status" hidden><span id="message"></span><button id="undo" hidden>復原剛刪除的一集</button></div>
+<p id="progress-note" class="help">每集播放進度會自動儲存在此瀏覽器，重新開啟即可接續。</p>
 <main id="episodes">__EPISODE_ITEMS__</main>
 <details id="trash-panel"><summary>回收區（<span id="trash-count">__TRASH_COUNT__</span>）</summary><p class="help">刪除的練習可以復原，或永久刪除以釋放該集輸出的空間。</p><div id="trash">__TRASH_ITEMS__</div></details>
 <p id="offline" class="help" hidden>請透過練習庫服務開啟此頁，才能刪除或復原內容。</p>
@@ -46,6 +48,23 @@ kbd{display:inline-block;font:inherit;font-size:12px;background:#fffdf9;border:1
 <script>
 const config=JSON.parse(document.getElementById('library-config').textContent);
 const $=id=>document.getElementById(id);
+const progressPrefix='podcast-practice:progress:v1:';
+function refreshProgress(){
+ document.querySelectorAll('#episodes .episode-progress').forEach(label=>{
+  label.hidden=true;
+  try{
+   const id=label.dataset.progressId||new URL(label.closest('a').href,location.href).pathname;
+   const value=JSON.parse(localStorage.getItem(progressPrefix+id)),duration=Number(label.dataset.duration);
+   if(value?.version!==1||!Number.isFinite(value.time)||value.time<0||!Number.isFinite(duration)||duration<=0)return;
+   const time=Math.min(duration,value.time),minutes=Math.floor(time/60).toString().padStart(2,'0'),seconds=Math.floor(time%60).toString().padStart(2,'0');
+   label.textContent=time===duration?'已播至結尾 · 100%':`上次停在 ${minutes}:${seconds} · ${Math.floor(time/duration*100)}%`;
+   label.hidden=false;
+  }catch(error){if(!(error instanceof SyntaxError))$('progress-note').textContent='此瀏覽器無法讀取儲存的播放進度。';}
+ });
+}
+refreshProgress();
+window.addEventListener('pageshow',refreshProgress);window.addEventListener('focus',refreshProgress);
+window.addEventListener('storage',event=>{if(event.key===null||event.key?.startsWith(progressPrefix))refreshProgress();});
 let lastDeleted=null,pendingPurge=null;
 const allowedOrigin=config.upload?.origins?.includes(location.origin);
 const enabled=Boolean(config.token)&&location.protocol==='http:';
@@ -56,6 +75,7 @@ async function refreshLibrary(){
  if(!page.ok)throw new Error('操作已完成，請重新整理練習庫。');
  const next=new DOMParser().parseFromString(await page.text(),'text/html');
  for(const id of ['episodes','trash','trash-count'])$(id).replaceChildren(...next.getElementById(id).childNodes);
+ refreshProgress();
  document.querySelectorAll('[data-action]').forEach(b=>b.disabled=!enabled);
 }
 function notice(text,error=false){$('message').textContent=text;$('notice').hidden=false;$('notice').classList.toggle('error',error);$('undo').hidden=!lastDeleted||error;}

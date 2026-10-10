@@ -176,6 +176,30 @@ seeking far into them. The exported `player.html` still embeds the complete audi
 for single-file offline use. Playback updates only changed highlights and controls;
 off-screen sentence contents skip layout in browsers supporting `content-visibility`.
 
+## Browser playback progress
+
+Each episode automatically saves its last playback position in this browser.
+Reopening the player restores that position after the audio metadata loads and
+leaves playback paused; press Play to continue. The library shows the last position
+and its percentage of the episode, or that playback reached the end. **從頭開始**
+in the player resets only that episode to the beginning and leaves it paused.
+
+Progress is saved about every two seconds during playback, and immediately when
+pausing, finishing a seek, reaching the end, hiding the page, or leaving it. Episodes
+use their audio identity, so identical titles stay independent and regenerating a
+player keeps its progress. Older exports without an audio identity use their
+fingerprint or page path instead.
+
+Records live in browser `localStorage`; they are not synced between devices,
+browser profiles, or website origins (including different hostnames or ports).
+Clearing site data clears progress. Direct `file://` playback depends on the
+browser's local-file storage support; use the library server for consistent storage.
+If storage is blocked or full, the player explains that saving is unavailable and
+continues to play normally.
+
+Update portable players with the `render` command above. Restart an existing
+library server after updating the application, then refresh the player and library.
+
 ## Delete and restore episodes
 
 Each episode in the library has a delete button. After deletion, use the undo

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from podcast_practice.errors import PracticeError
-from podcast_practice.render import export_episode, timestamp, update_library
+from podcast_practice.render import export_episode, library_html, timestamp, update_library
 from podcast_practice.runtime import Runtime, conda_platform
 
 
@@ -53,6 +53,23 @@ def test_export_escapes_title_and_script_content_and_preserves_audio(tmp_path):
     index = (folder.parent / "index.html").read_text()
     assert "one/player.html" in index
     assert title not in index
+    progress_id = data["audio_sha256"]
+    assert f'data-progress-id="{progress_id}"' in index
+    assert 'data-duration="2.0"' in index
+
+
+def test_library_progress_identity_escapes_legacy_fingerprint(tmp_path):
+    folder = tmp_path / "episode"
+    folder.mkdir()
+    (folder / "player.html").write_text("player")
+    (folder / "alignment.json").write_text(
+        json.dumps(
+            {"title": "Legacy", "duration": 20, "sentences": [], "fingerprint": '\"><img src=x>'}
+        )
+    )
+    content = library_html(tmp_path)
+    assert 'data-progress-id="&quot;&gt;&lt;img src=x&gt;"' in content
+    assert "<img src=x>" not in content
 
 
 def test_runtime_does_not_write_to_default_mfa_documents(tmp_path):
