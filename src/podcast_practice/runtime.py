@@ -14,6 +14,7 @@ from pathlib import Path
 from filelock import FileLock
 
 from .errors import PracticeError
+from .processes import process_group_options, stop_process
 
 MFA_VERSION = "3.4.2"
 MICROMAMBA_VERSION = "2.9.0"
@@ -28,8 +29,10 @@ def conda_platform(system: str | None = None, machine: str | None = None) -> str
         return "osx-64"
     if system == "Linux" and machine in {"x86_64", "amd64"}:
         return "linux-64"
+    if system == "Windows" and machine in {"x86_64", "amd64"}:
+        return "win-64"
     raise PracticeError(
-        f"目前自動安裝支援 Linux x86_64 與 macOS（Intel / Apple Silicon）；"
+        f"目前自動安裝支援 Linux x86_64、Windows x86_64 與 macOS（Intel / Apple Silicon）；"
         f"偵測到 {system} {machine}。可用 --mfa-prefix 指向自行安裝的 MFA 環境。"
     )
 
@@ -39,7 +42,12 @@ class Runtime:
         self.root = root.expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.config_path = self.root / "config.json"
-        self.config = json.loads(self.config_path.read_text()) if self.config_path.exists() else {}
+        self.config = (
+            json.loads(self.config_path.read_text(encoding="utf-8"))
+            if self.config_path.exists()
+            else {}
+        )
+        self.windows = platform.system() == "Windows"
         self.prefix = Path(self.config.get("mfa_prefix", self.root / "mfa-env"))
         self.state = Path(self.config.get("model_dir", self.root / "mfa-state"))
         self.asr_cache = Path(self.config.get("asr_cache", self.root / "asr-models"))
@@ -47,17 +55,40 @@ class Runtime:
 
     @property
     def bin(self) -> Path:
-        return self.prefix / "bin"
+        return self.prefix / "Library" / "bin" if self.windows else self.prefix / "bin"
 
     @property
     def mfa(self) -> Path:
-        return self.bin / "mfa"
+        return self.prefix / "Scripts" / "mfa.exe" if self.windows else self.bin / "mfa"
+
+    @property
+    def ffmpeg(self) -> Path:
+        return self.bin / ("ffmpeg.exe" if self.windows else "ffmpeg")
+
+    @property
+    def ffprobe(self) -> Path:
+        return self.bin / ("ffprobe.exe" if self.windows else "ffprobe")
 
     def environment(self) -> dict[str, str]:
         env = os.environ.copy()
+        # Mirror Conda's Windows PATH layout so Python and native tools can load
+        # their DLLs and find Kaldi without activating an interactive shell.
+        paths = (
+            [
+                self.prefix,
+                self.prefix / "Library" / "mingw-w64" / "bin",
+                self.prefix / "Library" / "usr" / "bin",
+                self.bin,
+                self.prefix / "Scripts",
+                self.prefix / "bin",
+            ]
+            if self.windows
+            else [self.bin]
+        )
         env.update(
             {
-                "PATH": str(self.bin) + os.pathsep + env.get("PATH", ""),
+                "PATH": os.pathsep.join([*(str(path) for path in paths), env.get("PATH", "")]),
+                "CONDA_PREFIX": str(self.prefix),
                 "MFA_ROOT_DIR": str(self.state),
                 "MAMBA_ROOT_PREFIX": str(self.root / "conda"),
                 "XDG_CACHE_HOME": str(self.root / "cache"),
@@ -67,9 +98,12 @@ class Runtime:
                 "OPENBLAS_NUM_THREADS": "2",
                 "OMP_NUM_THREADS": "2",
                 "PYTHONUNBUFFERED": "1",
-                "LC_ALL": "C.UTF-8" if platform.system() == "Linux" else "en_US.UTF-8",
+                "PYTHONUTF8": "1",
+                "PYTHONIOENCODING": "utf-8",
             }
         )
+        if not self.windows:
+            env["LC_ALL"] = "C.UTF-8" if platform.system() == "Linux" else "en_US.UTF-8"
         for key in ["MFA_ROOT_DIR", "XDG_CACHE_HOME", "MPLCONFIGDIR", "NUMBA_CACHE_DIR", "HF_HOME"]:
             Path(env[key]).mkdir(parents=True, exist_ok=True)
         return env
@@ -86,7 +120,9 @@ class Runtime:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
                 errors="replace",
+                **(process_group_options() if self.windows else {}),
             ) as proc:
                 assert proc.stdout is not None
                 try:
@@ -96,11 +132,7 @@ class Runtime:
                             handle.write(line)
                     code = proc.wait()
                 except KeyboardInterrupt:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
+                    stop_process(proc)
                     raise
             if code:
                 hint = f"，詳細記錄：{log}" if log else ""
@@ -112,7 +144,7 @@ class Runtime:
                 handle.close()
 
     def require_ready(self) -> None:
-        if not self.mfa.is_file() or not (self.bin / "ffmpeg").is_file():
+        if any(not path.is_file() for path in (self.mfa, self.ffmpeg, self.ffprobe)):
             raise PracticeError("本地 MFA 尚未安裝。請先執行 uv run podcast-practice setup。")
         missing = [name for kind, name in MODELS.items() if not self.model_path(kind).exists()]
         if missing:
@@ -133,37 +165,47 @@ class Runtime:
     ) -> None:
         if mfa_prefix:
             self.prefix = mfa_prefix.expanduser().resolve()
-            if not (self.prefix / "bin" / "mfa").is_file():
-                raise PracticeError("--mfa-prefix 必須指向已有 bin/mfa 的 Conda/MFA 環境。")
+            if not self.mfa.is_file():
+                entry = self.mfa.relative_to(self.prefix)
+                raise PracticeError(f"--mfa-prefix 必須指向已有 {entry} 的 Conda/MFA 環境。")
         if model_dir:
             self.state = model_dir.expanduser().resolve()
         if asr_cache:
             self.asr_cache = asr_cache.expanduser().resolve()
         if not self.mfa.is_file():
             subdir = conda_platform()
-            executable = self.root / "bin" / "micromamba"
+            binary = "micromamba.exe" if self.windows else "micromamba"
+            member_name = "Library/bin/micromamba.exe" if self.windows else "bin/micromamba"
+            executable = self.root / "bin" / binary
             executable.parent.mkdir(parents=True, exist_ok=True)
             if not executable.exists():
                 url = f"https://micro.mamba.pm/api/micromamba/{subdir}/{MICROMAMBA_VERSION}"
                 archive = self.root / "micromamba.tar.bz2"
                 print(f"下載 micromamba {MICROMAMBA_VERSION}（{subdir}）…", flush=True)
                 request = urllib.request.Request(url, headers={"User-Agent": "podcast-practice"})
+                temporary = executable.with_suffix(executable.suffix + ".tmp")
                 try:
                     with urllib.request.urlopen(request, timeout=60) as response:
                         with archive.open("wb") as target:
                             shutil.copyfileobj(response, target)
                     # Read only the expected binary; never extract arbitrary archive paths.
                     with tarfile.open(archive, "r:bz2") as bundle:
-                        member = bundle.getmember("bin/micromamba")
-                        source = bundle.extractfile(member)
-                        if source is None or not member.isfile():
+                        member = bundle.getmember(member_name)
+                        if not member.isfile():
                             raise PracticeError("micromamba 壓縮檔沒有預期的執行檔。")
-                        with executable.open("wb") as target:
+                        source = bundle.extractfile(member)
+                        if source is None:
+                            raise PracticeError("micromamba 壓縮檔沒有預期的執行檔。")
+                        with source, temporary.open("wb") as target:
                             shutil.copyfileobj(source, target)
-                    executable.chmod(0o755)
-                except OSError as exc:
+                    if not self.windows:
+                        temporary.chmod(0o755)
+                    temporary.replace(executable)
+                except (OSError, tarfile.TarError, KeyError) as exc:
                     raise PracticeError(f"下載 micromamba 失敗：{exc}") from exc
-            print("建立 MFA 隔離環境；首次會下載數百 MB 的原生依賴…", flush=True)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            print("建立 MFA 隔離環境；首次可能下載數 GB 的原生依賴…", flush=True)
             self.run(
                 [
                     executable,
@@ -198,7 +240,9 @@ class Runtime:
 
             print(f"準備本地粗定位模型 {asr_model}…", flush=True)
             load_asr(self, asr_model, offline=False)
-        self.config_path.write_text(json.dumps(self.config, ensure_ascii=False, indent=2))
+        self.config_path.write_text(
+            json.dumps(self.config, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         self.require_ready()
         print("Setup 完成。之後可用 build 指定每天的音檔與 transcript。", flush=True)
 

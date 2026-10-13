@@ -13,9 +13,10 @@ downloads.
 ## Initial setup
 
 Automatic setup supports **Linux x86_64** (Ubuntu 22.04/24.04 or a compatible
-distribution is recommended) and macOS 14 or later on Intel and Apple Silicon.
-Linux ARM and Windows are not supported by automatic setup; the tool reports an
-unsupported platform instead of attempting to install incompatible packages.
+distribution is recommended), **Windows 10/11 x86_64**, and macOS 14 or later on
+Intel and Apple Silicon. Linux ARM and Windows ARM are not supported by automatic
+setup; the tool reports an unsupported platform instead of attempting to install
+incompatible packages.
 
 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git.
 2. Clone the repository and set up the local runtime:
@@ -27,6 +28,26 @@ uv sync --locked
 uv run podcast-practice setup
 uv run podcast-practice doctor
 ```
+
+On Windows, run the same setup commands in **PowerShell**. Automatic setup uses
+the official `win-64` micromamba package and the Windows Conda executable/DLL
+layout, following the [official micromamba installation documentation](https://mamba.readthedocs.io/en/stable/installation/micromamba-installation.html).
+WSL and an activated Conda shell are not required. Paths with spaces or
+Chinese characters are supported; quote paths containing spaces:
+
+```powershell
+uv run podcast-practice build "C:\Podcasts\today.mp3" "C:\Podcasts\today.txt" --title "Today's episode" --offline --open
+uv run podcast-practice serve --open
+```
+
+The multi-line `sh` examples below use Unix shell continuations (`\`). In
+PowerShell, enter the command on one line or use a backtick (`` ` ``) at the end
+of each continued line.
+
+The coarse-alignment engine also requires the Windows Visual C++ runtime,
+which is already installed on many computers. If it reports a missing runtime
+DLL, install the x64 runtime linked in the
+[CTranslate2 installation guide](https://opennmt.net/CTranslate2/installation.html).
 
 You can also transfer an exported Git bundle to another computer:
 
@@ -343,6 +364,13 @@ uv run podcast-practice setup --mfa-prefix /path/to/mfa-env \
   --model-dir /path/to/MFA --asr-cache /path/to/asr-cache
 ```
 
+On Windows, `--mfa-prefix` must point to the environment directory containing
+`Scripts\mfa.exe`, `Library\bin\ffmpeg.exe`, and `Library\bin\ffprobe.exe`:
+
+```powershell
+uv run podcast-practice setup --mfa-prefix "C:\Tools\mfa-env" --model-dir "C:\Models\MFA" --asr-cache "C:\Models\asr-cache"
+```
+
 Use `build ... --no-asr` to skip coarse recognition. Check music and trailing audio
 boundaries yourself in that mode. Timestamped SRT/VTT input still uses its supplied
 times.
@@ -381,9 +409,15 @@ uv run ruff check .
 
 Tests cover transcript formats, number and speaker parsing, automatic speech
 windows, invalid or overlapping windows, original-text preservation, HTML escaping,
-and player and library keyboard behavior. The regular test suite does not download
+player and library keyboard behavior, Windows/Unix runtime installation layouts,
+UTF-8 output, and stopping background builds together with their subprocesses.
+The regular test suite does not download
 speech models or require MFA. Real-audio alignment quality still needs listening
 checks on the target machine.
+
+On Windows, the symlink tests require Developer Mode or symlink privileges and
+are skipped if those privileges are unavailable. The remaining tests run without
+administrator rights.
 
 Keyboard regression tests use Node.js without npm dependencies. When Node.js is
 available, pytest runs them automatically; otherwise that test is skipped. You can

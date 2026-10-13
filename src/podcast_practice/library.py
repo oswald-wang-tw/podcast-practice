@@ -68,7 +68,9 @@ def delete_episode(root: Path, name: str) -> dict:
             "title": data.get("title", name),
             "deleted": datetime.now(timezone.utc).isoformat(),
         }
-        (target / "metadata.json").write_text(json.dumps(record, ensure_ascii=False, indent=2))
+        (target / "metadata.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         source.rename(target / "episode")
         return record
 

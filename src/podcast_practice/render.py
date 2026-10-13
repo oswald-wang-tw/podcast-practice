@@ -62,11 +62,15 @@ def export_episode(data: dict, audio: Path, destination: Path) -> None:
         for i, s in enumerate(sentences)
         if i % step == 0
     ]
-    (destination / "alignment.json").write_text(json.dumps(data, ensure_ascii=False, indent=2))
-    (destination / "review.json").write_text(
-        json.dumps(data["review"], ensure_ascii=False, indent=2)
+    (destination / "alignment.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    (destination / "transcript.txt").write_text("\n\n".join(s["text"] for s in sentences) + "\n")
+    (destination / "review.json").write_text(
+        json.dumps(data["review"], ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (destination / "transcript.txt").write_text(
+        "\n\n".join(s["text"] for s in sentences) + "\n", encoding="utf-8"
+    )
     srt, vtt = [], ["WEBVTT", ""]
     for i, chunk in enumerate(subtitle_cues(sentences)):
         timed = [w for w in chunk if w["start"] is not None]

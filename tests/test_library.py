@@ -47,11 +47,11 @@ def test_delete_rejects_paths_outside_single_episode(tmp_path, name):
     assert (root / "test-episode" / "audio.mp3").is_file()
 
 
-def test_delete_rejects_symlinks_and_non_episode_directories(tmp_path):
+def test_delete_rejects_symlinks_and_non_episode_directories(tmp_path, make_symlink):
     root = tmp_path / "library"
     external = make_episode(tmp_path / "outside")
     root.mkdir()
-    (root / "linked").symlink_to(external, target_is_directory=True)
+    make_symlink(root / "linked", external)
     (root / "other").mkdir()
     with pytest.raises(PracticeError, match="符號連結"):
         delete_episode(root, "linked")
@@ -130,7 +130,7 @@ def test_purge_rejects_invalid_ids(tmp_path, identifier):
     assert (root / "test-episode" / "audio.mp3").is_file()
 
 
-def test_purge_does_not_follow_symlinks_into_original_files(tmp_path):
+def test_purge_does_not_follow_symlinks_into_original_files(tmp_path, make_symlink):
     root = tmp_path / "library"
     record = delete_episode(root, make_episode(root).name)
     external = tmp_path / "outside"
@@ -138,11 +138,11 @@ def test_purge_does_not_follow_symlinks_into_original_files(tmp_path):
     protected = external / "original.txt"
     protected.write_text("keep this")
     entry = root / ".trash" / record["id"]
-    (entry / "episode" / "linked-folder").symlink_to(external, target_is_directory=True)
+    make_symlink(entry / "episode" / "linked-folder", external)
     purge_episode(root, record["id"], confirmed=True)
     assert protected.read_text() == "keep this"
     linked = root / ".trash" / ("a" * 32)
-    linked.symlink_to(external, target_is_directory=True)
+    make_symlink(linked, external)
     with pytest.raises(PracticeError, match="符號連結"):
         purge_episode(root, linked.name, confirmed=True)
     assert protected.read_text() == "keep this"

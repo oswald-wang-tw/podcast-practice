@@ -12,6 +12,7 @@ def test_linux_and_mac_platforms_are_independent_of_developer_machine():
     assert conda_platform("Linux", "x86_64") == "linux-64"
     assert conda_platform("Darwin", "arm64") == "osx-arm64"
     assert conda_platform("Darwin", "x86_64") == "osx-64"
+    assert conda_platform("Windows", "AMD64") == "win-64"
     with pytest.raises(PracticeError, match="Linux x86_64"):
         conda_platform("Linux", "aarch64")
 
@@ -19,7 +20,7 @@ def test_linux_and_mac_platforms_are_independent_of_developer_machine():
 def test_export_escapes_title_and_script_content_and_preserves_audio(tmp_path):
     audio = tmp_path / "input.mp3"
     audio.write_bytes(b"a small fake audio payload for renderer testing")
-    title = '</script><script>alert("oops")</script>'
+    title = '</script><script>alert("oops")</script> 聽力練習 🎧'
     sentence = {
         "id": 0,
         "speaker": "Guest",
@@ -41,16 +42,16 @@ def test_export_escapes_title_and_script_content_and_preserves_audio(tmp_path):
     }
     folder = tmp_path / "library" / "one"
     export_episode(data, audio, folder)
-    content = (folder / "player.html").read_text()
+    content = (folder / "player.html").read_text(encoding="utf-8")
     assert "&lt;/script&gt;" in content
     assert "<\\/script>" in content
     assert base64.b64encode(audio.read_bytes()).decode() in content
     assert "__TITLE__" not in content
     assert "FT News Briefing" not in content
-    assert json.loads((folder / "alignment.json").read_text())["title"] == title
-    assert "00:00:00,500 --> 00:00:01,700" in (folder / "subtitles.srt").read_text()
+    assert json.loads((folder / "alignment.json").read_text(encoding="utf-8"))["title"] == title
+    assert "00:00:00,500 --> 00:00:01,700" in (folder / "subtitles.srt").read_text(encoding="utf-8")
     update_library(folder.parent)
-    index = (folder.parent / "index.html").read_text()
+    index = (folder.parent / "index.html").read_text(encoding="utf-8")
     assert "one/player.html" in index
     assert title not in index
     progress_id = data["audio_sha256"]

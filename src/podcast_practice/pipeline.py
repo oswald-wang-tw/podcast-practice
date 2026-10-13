@@ -139,7 +139,7 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
     job = runtime.root / "jobs" / key
     job.mkdir(parents=True, exist_ok=True)
     (job / "transcript-map.json").write_text(
-        json.dumps(transcript.to_dict(), ensure_ascii=False, indent=2)
+        json.dumps(transcript.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
     )
     normalized = job / "episode.lab"
     normalized.write_text(" ".join(transcript.normalized) + "\n", encoding="utf-8")
@@ -149,7 +149,7 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
         print("轉換 MFA 使用的音訊…", flush=True)
         runtime.run(
             [
-                runtime.bin / "ffmpeg",
+                runtime.ffmpeg,
                 "-hide_banner",
                 "-loglevel",
                 "error",
@@ -216,7 +216,9 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
     windows, coverage = search_windows(
         transcript, initial, duration, recognized, overrides, gaps=gaps
     )
-    (job / "windows.json").write_text(json.dumps(windows, ensure_ascii=False, indent=2))
+    (job / "windows.json").write_text(
+        json.dumps(windows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     if coverage is not None:
         print(f"原稿與本地辨識的粗定位吻合率：{coverage:.0%}", flush=True)
         if coverage < 0.35 and not options.allow_low_confidence:
@@ -247,7 +249,7 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
         else:
             runtime.run(
                 [
-                    runtime.bin / "ffmpeg",
+                    runtime.ffmpeg,
                     "-hide_banner",
                     "-loglevel",
                     "error",
@@ -266,7 +268,7 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
     # The encoded original/converted MP3 can differ by a few milliseconds from the analysis WAV.
     probe = subprocess.run(
         [
-            str(runtime.bin / "ffprobe"),
+            str(runtime.ffprobe),
             "-v",
             "error",
             "-show_entries",
@@ -278,6 +280,7 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
         env=runtime.environment(),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     playback_duration = float(json.loads(probe.stdout)["format"]["duration"])
@@ -302,7 +305,9 @@ def build(runtime: Runtime, options: BuildOptions) -> Path:
     }
     destination.mkdir(parents=True, exist_ok=True)
     export_episode(metadata, mp3, destination)
-    (destination / "windows.json").write_text(json.dumps(windows, ensure_ascii=False, indent=2))
+    (destination / "windows.json").write_text(
+        json.dumps(windows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     if options.output is None:
         update_library(options.library.resolve())
     print(f"完成：{len(sentences)} 句；{len(report['warnings'])} 項建議核對。", flush=True)
